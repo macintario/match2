@@ -1,0 +1,28 @@
+<%- include('partials/head') %>
+
+<main class="auth-wrap">
+  <section class="card auth-card">
+    <h1>Ingreso a la Plataforma</h1>
+    <p>Accede con tu correo y contrasena.</p>
+
+    <% if (flash) { %>
+      <div class="alert alert-<%= flash.type %>"><%= flash.text %></div>
+    <% } %>
+
+    <form action="/login" method="POST" class="form-grid">
+      <label>
+        Correo
+        <input type="email" name="email" required />
+      </label>
+
+      <label>
+        Contrasena
+        <input type="password" name="password" required />
+      </label>
+
+      <button type="submit" class="btn btn-primary">Entrar</button>
+    </form>
+  </section>
+</main>
+
+<%- include('partials/foot') %>

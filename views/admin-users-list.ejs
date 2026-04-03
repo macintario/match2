@@ -1,0 +1,42 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <div class="row-between">
+      <h1>Usuarios</h1>
+      <a href="/admin/users/new" class="btn btn-primary">Nuevo Usuario</a>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Nombre</th>
+            <th>Correo</th>
+            <th>Rol</th>
+            <th>Activo</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% users.forEach((user) => { %>
+            <tr>
+              <td><%= user.id %></td>
+              <td><%= user.name %></td>
+              <td><%= user.email %></td>
+              <td><span class="badge"><%= user.role %></span></td>
+              <td><%= user.active ? 'Si' : 'No' %></td>
+              <td>
+                <a href="/admin/users/<%= user.id %>/edit" class="btn btn-ghost">Editar</a>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<%- include('partials/foot') %>

@@ -1,0 +1,28 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <h1>Panel de Administrador</h1>
+    <p>Desde aqui puedes administrar usuarios y perfiles de acceso.</p>
+
+    <div class="stats-grid">
+      <article class="stat-card">
+        <h3>Usuarios Totales</h3>
+        <p><%= stats.totalUsers %></p>
+      </article>
+      <article class="stat-card">
+        <h3>Analistas</h3>
+        <p><%= stats.totalAnalistas %></p>
+      </article>
+      <article class="stat-card">
+        <h3>Escuelas</h3>
+        <p><%= stats.totalEscuelas %></p>
+      </article>
+    </div>
+
+    <a href="/admin/users" class="btn btn-primary">Gestionar Usuarios</a>
+  </section>
+</main>
+
+<%- include('partials/foot') %>

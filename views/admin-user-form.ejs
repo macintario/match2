@@ -1,0 +1,62 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <h1><%= formMode === 'create' ? 'Crear Usuario' : 'Editar Usuario' %></h1>
+
+    <form
+      action="<%= formMode === 'create' ? '/admin/users' : '/admin/users/' + userData.id + '?_method=PUT' %>"
+      method="POST"
+      class="form-grid"
+    >
+      <label>
+        Nombre
+        <input type="text" name="name" required value="<%= userData ? userData.name : '' %>" />
+      </label>
+
+      <label>
+        Correo
+        <input type="email" name="email" required value="<%= userData ? userData.email : '' %>" />
+      </label>
+
+      <% if (userData && userData.role === 'admin') { %>
+        <label>
+          Rol
+          <input type="text" value="Admin" disabled />
+        </label>
+      <% } else { %>
+        <label>
+          Rol
+          <select name="role" required>
+            <option value="analista" <%= userData && userData.role === 'analista' ? 'selected' : '' %>>Analista</option>
+            <option value="escuela" <%= userData && userData.role === 'escuela' ? 'selected' : '' %>>Escuela</option>
+          </select>
+        </label>
+      <% } %>
+
+      <label>
+        <%= formMode === 'create' ? 'Contrasena' : 'Nueva contrasena (opcional)' %>
+        <input type="password" name="password" <%= formMode === 'create' ? 'required' : '' %> />
+      </label>
+
+      <% if (!(userData && userData.role === 'admin')) { %>
+        <label class="check-label">
+          <input
+            type="checkbox"
+            name="active"
+            <%= !userData || userData.active ? 'checked' : '' %>
+          />
+          Usuario activo
+        </label>
+      <% } %>
+
+      <div class="row-actions">
+        <a href="/admin/users" class="btn btn-ghost">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Guardar</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<%- include('partials/foot') %>
