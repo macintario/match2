@@ -16,8 +16,8 @@
       </label>
 
       <label>
-        Correo
-        <input type="email" name="email" required value="<%= userData ? userData.email : '' %>" />
+        Usuario
+        <input type="text" name="username" required value="<%= userData ? userData.username : '' %>" />
       </label>
 
       <% if (userData && userData.role === 'admin') { %>

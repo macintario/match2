@@ -45,10 +45,10 @@ npm start
 Al iniciar la aplicacion:
 
 - Se sincroniza la tabla `users`.
-- Se crea el usuario administrador inicial con `ADMIN_EMAIL` y `ADMIN_PASSWORD` (si no existe).
+- Se crea el usuario administrador inicial con `ADMIN_USERNAME` y `ADMIN_PASSWORD` (si no existe).
 
 ## Flujo principal
 
-- Ingresar en `/login` con el admin.
+- Ingresar en `/login` con el usuario admin.
 - Ir a `/admin/users` para crear o editar usuarios `analista` o `escuela`.
 - Cada usuario se redirige automaticamente a su panel segun su perfil.

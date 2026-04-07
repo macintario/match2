@@ -9,7 +9,7 @@ const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const { sequelize } = require('./models');
-const { ensureAdminUser } = require('./services/bootstrap');
+const { normalizeMissingUsernames, ensureAdminUser } = require('./services/bootstrap');
 
 const app = express();
 
@@ -62,7 +62,8 @@ const PORT = Number(process.env.PORT || 3000);
 async function start() {
   try {
     await sequelize.authenticate();
-    await sequelize.sync();
+    await sequelize.sync({ alter: true });
+    await normalizeMissingUsernames();
     await ensureAdminUser();
 
     app.listen(PORT, () => {

@@ -16,14 +16,14 @@ function renderLogin(req, res) {
 }
 
 async function login(req, res) {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
-  if (!email || !password) {
-    setFlash(req, 'error', 'Completa correo y contrasena.');
+  if (!username || !password) {
+    setFlash(req, 'error', 'Completa usuario y contrasena.');
     return res.redirect('/login');
   }
 
-  const user = await User.findOne({ where: { email } });
+  const user = await User.findOne({ where: { username } });
   if (!user || !user.active) {
     setFlash(req, 'error', 'Credenciales invalidas o usuario inactivo.');
     return res.redirect('/login');
@@ -38,7 +38,7 @@ async function login(req, res) {
   req.session.user = {
     id: user.id,
     name: user.name,
-    email: user.email,
+    username: user.username,
     role: user.role,
   };
 

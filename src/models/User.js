@@ -16,13 +16,19 @@ const User = sequelize.define(
         notEmpty: true,
       },
     },
-    email: {
+    username: {
       type: DataTypes.STRING(120),
-      allowNull: false,
+      allowNull: true,
       unique: true,
       validate: {
-        isEmail: true,
+        notEmpty: true,
       },
+    },
+    // Legacy support: keeps compatibility with old schema where email existed.
+    email: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+      unique: true,
     },
     passwordHash: {
       type: DataTypes.STRING(255),

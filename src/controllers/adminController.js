@@ -43,9 +43,9 @@ function newUserForm(req, res) {
 }
 
 async function createUser(req, res) {
-  const { name, email, password, role, active } = req.body;
+  const { name, username, password, role, active } = req.body;
 
-  if (!name || !email || !password || !role) {
+  if (!name || !username || !password || !role) {
     setFlash(req, 'error', 'Todos los campos obligatorios deben completarse.');
     return res.redirect('/admin/users/new');
   }
@@ -55,16 +55,17 @@ async function createUser(req, res) {
     return res.redirect('/admin/users/new');
   }
 
-  const existing = await User.findOne({ where: { email } });
+  const existing = await User.findOne({ where: { username } });
   if (existing) {
-    setFlash(req, 'error', 'El correo ya esta registrado.');
+    setFlash(req, 'error', 'El nombre de usuario ya esta registrado.');
     return res.redirect('/admin/users/new');
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
   await User.create({
     name,
-    email,
+    username,
+    email: `${username}@local.invalid`,
     passwordHash,
     role,
     active: active === 'on',
@@ -93,10 +94,10 @@ async function updateUser(req, res) {
     return res.status(404).render('not-found', { title: 'Usuario no encontrado' });
   }
 
-  const { name, email, password, role, active } = req.body;
+  const { name, username, password, role, active } = req.body;
 
-  if (!name || !email) {
-    setFlash(req, 'error', 'Nombre y correo son obligatorios.');
+  if (!name || !username) {
+    setFlash(req, 'error', 'Nombre y usuario son obligatorios.');
     return res.redirect(`/admin/users/${user.id}/edit`);
   }
 
@@ -107,14 +108,15 @@ async function updateUser(req, res) {
     return res.redirect(`/admin/users/${user.id}/edit`);
   }
 
-  const existing = await User.findOne({ where: { email } });
+  const existing = await User.findOne({ where: { username } });
   if (existing && existing.id !== user.id) {
-    setFlash(req, 'error', 'El correo ya esta registrado por otro usuario.');
+    setFlash(req, 'error', 'El nombre de usuario ya esta registrado por otro usuario.');
     return res.redirect(`/admin/users/${user.id}/edit`);
   }
 
   user.name = name;
-  user.email = email;
+  user.username = username;
+  user.email = `${username}@local.invalid`;
   user.role = user.role === 'admin' ? 'admin' : requestedRole;
   user.active = user.role === 'admin' ? true : active === 'on';
 
