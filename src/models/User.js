@@ -39,6 +39,11 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 'escuela',
     },
+    zona_pagadora: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true,
+      defaultValue: 0,
+    },
     active: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

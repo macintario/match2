@@ -20,6 +20,17 @@
         <input type="text" name="username" required value="<%= userData ? userData.username : '' %>" />
       </label>
 
+      <label>
+        Zona pagadora
+        <input
+          type="number"
+          name="zona_pagadora"
+          min="0"
+          step="1"
+          value="<%= userData ? userData.zona_pagadora : 0 %>"
+        />
+      </label>
+
       <% if (userData && userData.role === 'admin') { %>
         <label>
           Rol

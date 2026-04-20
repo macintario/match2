@@ -15,6 +15,7 @@
             <th>ID</th>
             <th>Nombre</th>
             <th>Usuario</th>
+            <th>Zona pagadora</th>
             <th>Rol</th>
             <th>Activo</th>
             <th>Acciones</th>
@@ -26,6 +27,7 @@
               <td><%= user.id %></td>
               <td><%= user.name %></td>
               <td><%= user.username %></td>
+              <td><%= user.zona_pagadora ?? 0 %></td>
               <td><span class="badge"><%= user.role %></span></td>
               <td><%= user.active ? 'Si' : 'No' %></td>
               <td>

@@ -5,6 +5,19 @@ function setFlash(req, type, text) {
   req.session.flash = { type, text };
 }
 
+function parseZonaPagadora(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return 0;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
 async function adminHome(req, res) {
   const totalUsers = await User.count();
   const totalAnalistas = await User.count({ where: { role: 'analista' } });
@@ -44,6 +57,7 @@ function newUserForm(req, res) {
 
 async function createUser(req, res) {
   const { name, username, password, role, active } = req.body;
+  const zonaPagadora = parseZonaPagadora(req.body.zona_pagadora);
 
   if (!name || !username || !password || !role) {
     setFlash(req, 'error', 'Todos los campos obligatorios deben completarse.');
@@ -52,6 +66,11 @@ async function createUser(req, res) {
 
   if (!['analista', 'escuela'].includes(role)) {
     setFlash(req, 'error', 'Rol invalido.');
+    return res.redirect('/admin/users/new');
+  }
+
+  if (zonaPagadora === null) {
+    setFlash(req, 'error', 'Zona pagadora invalida. Debe ser un numero mayor o igual a 0.');
     return res.redirect('/admin/users/new');
   }
 
@@ -68,6 +87,7 @@ async function createUser(req, res) {
     email: `${username}@local.invalid`,
     passwordHash,
     role,
+    zona_pagadora: zonaPagadora,
     active: active === 'on',
   });
 
@@ -95,6 +115,7 @@ async function updateUser(req, res) {
   }
 
   const { name, username, password, role, active } = req.body;
+  const zonaPagadora = parseZonaPagadora(req.body.zona_pagadora);
 
   if (!name || !username) {
     setFlash(req, 'error', 'Nombre y usuario son obligatorios.');
@@ -108,6 +129,11 @@ async function updateUser(req, res) {
     return res.redirect(`/admin/users/${user.id}/edit`);
   }
 
+  if (zonaPagadora === null) {
+    setFlash(req, 'error', 'Zona pagadora invalida. Debe ser un numero mayor o igual a 0.');
+    return res.redirect(`/admin/users/${user.id}/edit`);
+  }
+
   const existing = await User.findOne({ where: { username } });
   if (existing && existing.id !== user.id) {
     setFlash(req, 'error', 'El nombre de usuario ya esta registrado por otro usuario.');
@@ -118,6 +144,7 @@ async function updateUser(req, res) {
   user.username = username;
   user.email = `${username}@local.invalid`;
   user.role = user.role === 'admin' ? 'admin' : requestedRole;
+  user.zona_pagadora = zonaPagadora;
   user.active = user.role === 'admin' ? true : active === 'on';
 
   if (password && password.trim()) {
