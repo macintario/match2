@@ -69,7 +69,13 @@ async function ensureSchemaCompatibility() {
 
     if (!columns.uploadType) {
       await queryInterface.addColumn(tableName, 'uploadType', {
-        type: DataTypes.ENUM('PXP', 'HISTORICO'),
+        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA'),
+        allowNull: false,
+        defaultValue: 'PXP',
+      });
+    } else {
+      await queryInterface.changeColumn(tableName, 'uploadType', {
+        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA'),
         allowNull: false,
         defaultValue: 'PXP',
       });
@@ -77,6 +83,22 @@ async function ensureSchemaCompatibility() {
 
     if (!columns.totalAsignaturas) {
       await queryInterface.addColumn(tableName, 'totalAsignaturas', {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        defaultValue: 0,
+      });
+    }
+
+    if (!columns.totalHorarios) {
+      await queryInterface.addColumn(tableName, 'totalHorarios', {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        defaultValue: 0,
+      });
+    }
+
+    if (!columns.totalActividades) {
+      await queryInterface.addColumn(tableName, 'totalActividades', {
         type: DataTypes.INTEGER.UNSIGNED,
         allowNull: false,
         defaultValue: 0,

@@ -18,7 +18,7 @@ const XmlUpload = sequelize.define(
       allowNull: false,
     },
     uploadType: {
-      type: DataTypes.ENUM('PXP', 'HISTORICO'),
+      type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA'),
       allowNull: false,
       defaultValue: 'PXP',
     },
@@ -38,6 +38,16 @@ const XmlUpload = sequelize.define(
       defaultValue: 0,
     },
     totalAsignaturas: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    totalHorarios: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    totalActividades: {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: false,
       defaultValue: 0,

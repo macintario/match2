@@ -135,7 +135,94 @@ function parseHistoricoXml(xmlContent) {
   };
 }
 
+function parseRuaaXml(xmlContent) {
+  const parser = new XMLParser({
+    ignoreAttributes: true,
+    trimValues: true,
+    parseTagValue: false,
+  });
+
+  const parsed = parser.parse(xmlContent);
+  const rootKey = Object.keys(parsed || {}).find((key) => !key.startsWith('?'));
+  const root = rootKey ? parsed[rootKey] : null;
+
+  if (!root || !root.LIST_G_DOCENTE) {
+    throw new Error('Estructura XML no reconocida: falta LIST_G_DOCENTE.');
+  }
+
+  const docentes = toArray(root.LIST_G_DOCENTE.G_DOCENTE);
+  const classSchedules = [];
+  const activitySchedules = [];
+
+  for (const docente of docentes) {
+    const classRows = toArray(docente?.LIST_G_CARR?.G_CARR);
+    for (const classRow of classRows) {
+      const cargas = toArray(classRow?.LIST_G_CARGA?.G_CARGA);
+      for (const carga of cargas) {
+        classSchedules.push({
+          numEmp: readValue(docente.NUM_EMP),
+          rfc: readValue(docente.RFC),
+          nombre: readValue(docente.NOMBRE),
+          plantel: readValue(docente.PLANTEL),
+          usuarioPlantel: readValue(docente.USUARIO),
+          turnoDocente: readValue(docente.TURNO),
+          carreraId: readValue(classRow.CARR),
+          asignaturaId: readValue(classRow.ASIG),
+          asignaturaDescripcion: readValue(classRow.ASIGNATURA),
+          grupo: readValue(classRow.GRUPO),
+          academia: readValue(classRow.ACADEMIA),
+          horas: readValue(classRow.HRS_ASIG),
+          lunes: readValue(carga.LUNES),
+          martes: readValue(carga.MARTES),
+          miercoles: readValue(carga.MIERCOLES),
+          jueves: readValue(carga.JUEVES),
+          viernes: readValue(carga.VIERNES),
+          sabado: readValue(carga.SABADO),
+          domingo: readValue(carga.DOMINGO),
+        });
+      }
+    }
+
+    const activityRows = toArray(docente?.LIST_G_DESCARGA?.G_DESCARGA);
+    for (const activityRow of activityRows) {
+      activitySchedules.push({
+        numEmp: readValue(docente.NUM_EMP),
+        rfc: readValue(docente.RFC),
+        nombre: readValue(docente.NOMBRE),
+        plantel: readValue(docente.PLANTEL),
+        usuarioPlantel: readValue(docente.USUARIO),
+        turnoDocente: readValue(docente.TURNO),
+        actividadClave: readValue(activityRow.CVE_ACT),
+        actividadNombre: readValue(activityRow.ACTIVIDAD),
+        lugarActividad: readValue(activityRow.LUGAR),
+        horas: readValue(activityRow.DES_HRS_ACTIV),
+        lunes: readValue(activityRow.LUNES1),
+        martes: readValue(activityRow.MARTES1),
+        miercoles: readValue(activityRow.MIERCOLES1),
+        jueves: readValue(activityRow.JUEVES1),
+        viernes: readValue(activityRow.VIERNES1),
+        sabado: readValue(activityRow.SABADO1),
+        domingo: readValue(activityRow.DOMINGO1),
+      });
+    }
+  }
+
+  const docentesUnicos = new Set(docentes.map((item) => `${readValue(item.RFC)}|${readValue(item.NUM_EMP)}|${readValue(item.NOMBRE)}`));
+
+  return {
+    summary: {
+      totalDocentes: docentesUnicos.size,
+      totalHorarios: classSchedules.length,
+      totalActividades: activitySchedules.length,
+      totalRegistros: classSchedules.length + activitySchedules.length,
+    },
+    classSchedules,
+    activitySchedules,
+  };
+}
+
 module.exports = {
   parsePayrollXml,
   parseHistoricoXml,
+  parseRuaaXml,
 };

@@ -26,6 +26,16 @@
       </div>
     </form>
 
+    <form action="/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+      <label>
+        Cargar RUAA.xml de horarios docentes
+        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn btn-primary">Procesar RUAA</button>
+      </div>
+    </form>
+
     <h3>Registro de cargas</h3>
     <div class="table-wrap">
       <table>
@@ -40,12 +50,14 @@
             <th>Docentes</th>
             <th>Plazas</th>
             <th>Asignaturas</th>
+            <th>Horarios</th>
+            <th>Actividades</th>
           </tr>
         </thead>
         <tbody>
           <% if (!recentUploads || recentUploads.length === 0) { %>
             <tr>
-              <td colspan="9">Aun no hay cargas registradas.</td>
+              <td colspan="11">Aun no hay cargas registradas.</td>
             </tr>
           <% } %>
           <% (recentUploads || []).forEach((upload) => { %>
@@ -59,6 +71,8 @@
               <td><%= upload.totalDocentes %></td>
               <td><%= upload.totalPlazas %></td>
               <td><%= upload.totalAsignaturas || 0 %></td>
+              <td><%= upload.totalHorarios || 0 %></td>
+              <td><%= upload.totalActividades || 0 %></td>
             </tr>
           <% }) %>
         </tbody>
@@ -174,6 +188,96 @@
       </div>
       <% if (historicoReport.previewTruncated) { %>
         <p>Se muestran los primeros 120 registros de asignaturas.</p>
+      <% } %>
+    <% } %>
+
+    <% if (ruaaReport) { %>
+      <h3>Resumen RUAA</h3>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <h3>Docentes RUAA</h3>
+          <p><%= ruaaReport.summary.totalDocentes %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Horarios de clase</h3>
+          <p><%= ruaaReport.summary.totalHorarios %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Actividades adicionales</h3>
+          <p><%= ruaaReport.summary.totalActividades %></p>
+        </article>
+      </div>
+
+      <h3>Vista previa RUAA - Clases impartidas</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>RFC</th>
+              <th>Docente</th>
+              <th>Asignatura</th>
+              <th>Grupo</th>
+              <th>Lunes</th>
+              <th>Martes</th>
+              <th>Miercoles</th>
+              <th>Jueves</th>
+              <th>Viernes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% ruaaReport.classPreview.forEach((item) => { %>
+              <tr>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.asignaturaDescripcion || '-' %></td>
+                <td><%= item.grupo || '-' %></td>
+                <td><%= item.lunes || '-' %></td>
+                <td><%= item.martes || '-' %></td>
+                <td><%= item.miercoles || '-' %></td>
+                <td><%= item.jueves || '-' %></td>
+                <td><%= item.viernes || '-' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Vista previa RUAA - Actividades adicionales</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>RFC</th>
+              <th>Docente</th>
+              <th>Actividad</th>
+              <th>Lugar</th>
+              <th>Lunes</th>
+              <th>Martes</th>
+              <th>Miercoles</th>
+              <th>Jueves</th>
+              <th>Viernes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% ruaaReport.activityPreview.forEach((item) => { %>
+              <tr>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.actividadNombre || '-' %></td>
+                <td><%= item.lugarActividad || '-' %></td>
+                <td><%= item.lunes || '-' %></td>
+                <td><%= item.martes || '-' %></td>
+                <td><%= item.miercoles || '-' %></td>
+                <td><%= item.jueves || '-' %></td>
+                <td><%= item.viernes || '-' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <% if (ruaaReport.previewTruncated) { %>
+        <p>Se muestran los primeros 80 registros de cada seccion RUAA.</p>
       <% } %>
     <% } %>
 

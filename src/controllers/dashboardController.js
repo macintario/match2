@@ -1,10 +1,11 @@
 const { XMLValidator } = require('fast-xml-parser');
-const { parsePayrollXml, parseHistoricoXml } = require('../services/payrollXmlParser');
+const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
 const {
   XmlUpload,
   TeacherImport,
   PositionImport,
   HistoricalSubjectImport,
+  RuaaScheduleImport,
   User,
   sequelize,
 } = require('../models');
@@ -41,6 +42,7 @@ function redirectByRole(req, res) {
 async function analistaDashboard(req, res) {
   const report = req.session.analistaXmlReport || null;
   const historicoReport = req.session.analistaHistoricoReport || null;
+  const ruaaReport = req.session.analistaRuaaReport || null;
   const recentUploads = await XmlUpload.findAll({
     order: [['uploadedAt', 'DESC']],
     limit: 20,
@@ -51,6 +53,7 @@ async function analistaDashboard(req, res) {
     title: 'Panel Analista',
     report,
     historicoReport,
+    ruaaReport,
     recentUploads,
   });
 }
@@ -86,6 +89,8 @@ async function uploadAnalistaXml(req, res) {
           totalDocentes: report.summary.totalDocentes,
           totalPlazas: report.summary.totalPlazas,
           totalAsignaturas: 0,
+          totalHorarios: 0,
+          totalActividades: 0,
         },
         { transaction }
       );
@@ -172,6 +177,8 @@ async function uploadAnalistaHistoricoXml(req, res) {
           totalDocentes: historico.summary.totalDocentes,
           totalPlazas: 0,
           totalAsignaturas: historico.summary.totalAsignaturas,
+          totalHorarios: 0,
+          totalActividades: 0,
         },
         { transaction }
       );
@@ -218,6 +225,126 @@ async function uploadAnalistaHistoricoXml(req, res) {
   }
 }
 
+async function uploadAnalistaRuaaXml(req, res) {
+  try {
+    if (!req.file) {
+      setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
+      return res.redirect('/analista');
+    }
+
+    if (!/\.xml$/i.test(req.file.originalname || '')) {
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml.');
+      return res.redirect('/analista');
+    }
+
+    const xmlContent = decodeXmlBuffer(req.file.buffer);
+    const validXml = XMLValidator.validate(xmlContent);
+    if (validXml !== true) {
+      setFlash(req, 'error', 'El archivo no es un XML valido.');
+      return res.redirect('/analista');
+    }
+
+    const ruaa = parseRuaaXml(xmlContent);
+
+    await sequelize.transaction(async (transaction) => {
+      const upload = await XmlUpload.create(
+        {
+          userId: req.session.user.id,
+          originalFileName: req.file.originalname,
+          uploadType: 'RUAA',
+          totalEscuelas: 0,
+          totalDocentes: ruaa.summary.totalDocentes,
+          totalPlazas: 0,
+          totalAsignaturas: 0,
+          totalHorarios: ruaa.summary.totalHorarios,
+          totalActividades: ruaa.summary.totalActividades,
+        },
+        { transaction }
+      );
+
+      const classRows = ruaa.classSchedules.map((item) => ({
+        uploadId: upload.id,
+        entryType: 'CLASE',
+        numEmp: item.numEmp || null,
+        rfc: item.rfc || null,
+        nombre: item.nombre || null,
+        plantel: item.plantel || null,
+        usuarioPlantel: item.usuarioPlantel || null,
+        turnoDocente: item.turnoDocente || null,
+        carreraId: item.carreraId || null,
+        asignaturaId: item.asignaturaId || null,
+        asignaturaDescripcion: item.asignaturaDescripcion || null,
+        grupo: item.grupo || null,
+        academia: item.academia || null,
+        horas: item.horas || null,
+        actividadClave: null,
+        actividadNombre: null,
+        lugarActividad: null,
+        lunes: item.lunes || null,
+        martes: item.martes || null,
+        miercoles: item.miercoles || null,
+        jueves: item.jueves || null,
+        viernes: item.viernes || null,
+        sabado: item.sabado || null,
+        domingo: item.domingo || null,
+      }));
+
+      const activityRows = ruaa.activitySchedules.map((item) => ({
+        uploadId: upload.id,
+        entryType: 'ACTIVIDAD',
+        numEmp: item.numEmp || null,
+        rfc: item.rfc || null,
+        nombre: item.nombre || null,
+        plantel: item.plantel || null,
+        usuarioPlantel: item.usuarioPlantel || null,
+        turnoDocente: item.turnoDocente || null,
+        carreraId: null,
+        asignaturaId: null,
+        asignaturaDescripcion: null,
+        grupo: null,
+        academia: null,
+        horas: item.horas || null,
+        actividadClave: item.actividadClave || null,
+        actividadNombre: item.actividadNombre || null,
+        lugarActividad: item.lugarActividad || null,
+        lunes: item.lunes || null,
+        martes: item.martes || null,
+        miercoles: item.miercoles || null,
+        jueves: item.jueves || null,
+        viernes: item.viernes || null,
+        sabado: item.sabado || null,
+        domingo: item.domingo || null,
+      }));
+
+      const chunkSize = 1000;
+      for (let i = 0; i < classRows.length; i += chunkSize) {
+        await RuaaScheduleImport.bulkCreate(classRows.slice(i, i + chunkSize), { transaction });
+      }
+      for (let i = 0; i < activityRows.length; i += chunkSize) {
+        await RuaaScheduleImport.bulkCreate(activityRows.slice(i, i + chunkSize), { transaction });
+      }
+    });
+
+    req.session.analistaRuaaReport = {
+      summary: ruaa.summary,
+      classPreview: ruaa.classSchedules.slice(0, 80),
+      activityPreview: ruaa.activitySchedules.slice(0, 80),
+      previewTruncated:
+        ruaa.classSchedules.length > 80 || ruaa.activitySchedules.length > 80,
+    };
+
+    setFlash(
+      req,
+      'success',
+      `RUAA procesado: ${ruaa.summary.totalHorarios} horarios de clase y ${ruaa.summary.totalActividades} actividades.`
+    );
+    return res.redirect('/analista');
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo procesar RUAA.xml: ${error.message}`);
+    return res.redirect('/analista');
+  }
+}
+
 function escuelaDashboard(req, res) {
   return res.render('dashboard-escuela', {
     title: 'Panel Escuela',
@@ -229,5 +356,6 @@ module.exports = {
   analistaDashboard,
   uploadAnalistaXml,
   uploadAnalistaHistoricoXml,
+  uploadAnalistaRuaaXml,
   escuelaDashboard,
 };

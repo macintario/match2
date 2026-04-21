@@ -42,6 +42,13 @@ router.post(
 	handleXmlUpload,
 	dashboardController.uploadAnalistaHistoricoXml
 );
+router.post(
+	'/analista/upload-ruaa-xml',
+	ensureAuth,
+	requireRole(['analista']),
+	handleXmlUpload,
+	dashboardController.uploadAnalistaRuaaXml
+);
 router.get('/escuela', ensureAuth, requireRole(['escuela']), dashboardController.escuelaDashboard);
 
 module.exports = router;

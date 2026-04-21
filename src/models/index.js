@@ -4,6 +4,7 @@ const XmlUpload = require('./XmlUpload');
 const TeacherImport = require('./TeacherImport');
 const PositionImport = require('./PositionImport');
 const HistoricalSubjectImport = require('./HistoricalSubjectImport');
+const RuaaScheduleImport = require('./RuaaScheduleImport');
 
 User.hasMany(XmlUpload, { foreignKey: 'userId' });
 XmlUpload.belongsTo(User, { foreignKey: 'userId' });
@@ -20,6 +21,9 @@ PositionImport.belongsTo(XmlUpload, { foreignKey: 'uploadId' });
 XmlUpload.hasMany(HistoricalSubjectImport, { foreignKey: 'uploadId' });
 HistoricalSubjectImport.belongsTo(XmlUpload, { foreignKey: 'uploadId' });
 
+XmlUpload.hasMany(RuaaScheduleImport, { foreignKey: 'uploadId' });
+RuaaScheduleImport.belongsTo(XmlUpload, { foreignKey: 'uploadId' });
+
 module.exports = {
   sequelize,
   User,
@@ -27,4 +31,5 @@ module.exports = {
   TeacherImport,
   PositionImport,
   HistoricalSubjectImport,
+  RuaaScheduleImport,
 };
