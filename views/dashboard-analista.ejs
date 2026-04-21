@@ -6,6 +6,177 @@
     <h1>Panel Analista</h1>
     <p>Funciones habilitadas para el perfil Analista.</p>
 
+    <form action="/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+      <label>
+        Cargar XML de docentes y plazas
+        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn btn-primary">Procesar archivo</button>
+      </div>
+    </form>
+
+    <form action="/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+      <label>
+        Cargar HISTORICO.xml de asignaturas previas
+        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn btn-primary">Procesar HISTORICO</button>
+      </div>
+    </form>
+
+    <h3>Registro de cargas</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tipo</th>
+            <th>Archivo</th>
+            <th>Fecha y hora</th>
+            <th>Usuario</th>
+            <th>Escuelas</th>
+            <th>Docentes</th>
+            <th>Plazas</th>
+            <th>Asignaturas</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!recentUploads || recentUploads.length === 0) { %>
+            <tr>
+              <td colspan="9">Aun no hay cargas registradas.</td>
+            </tr>
+          <% } %>
+          <% (recentUploads || []).forEach((upload) => { %>
+            <tr>
+              <td><%= upload.id %></td>
+              <td><%= upload.uploadType || 'PXP' %></td>
+              <td><%= upload.originalFileName %></td>
+              <td><%= new Date(upload.uploadedAt).toLocaleString('es-MX') %></td>
+              <td><%= upload.User ? upload.User.name : '-' %></td>
+              <td><%= upload.totalEscuelas %></td>
+              <td><%= upload.totalDocentes %></td>
+              <td><%= upload.totalPlazas %></td>
+              <td><%= upload.totalAsignaturas || 0 %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+
+    <% if (report) { %>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <h3>Escuelas en XML</h3>
+          <p><%= report.summary.totalEscuelas %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Total docentes</h3>
+          <p><%= report.summary.totalDocentes %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Total plazas</h3>
+          <p><%= report.summary.totalPlazas %></p>
+        </article>
+      </div>
+
+      <div class="feature-list">
+        <% report.schools.forEach((school) => { %>
+          <div class="feature-item">
+            <h3><%= school.plantel || 'Plantel sin descripcion' %></h3>
+            <p>Plantel ID: <%= school.plantelId || '-' %> | Ciclo: <%= school.cicloId || '-' %> | Usuario: <%= school.usuario || '-' %></p>
+            <p>Docentes: <strong><%= school.docentes.length %></strong></p>
+          </div>
+        <% }) %>
+      </div>
+
+      <h3>Docentes y plazas</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>RFC</th>
+              <th>Num. Empleado</th>
+              <th>Nombre</th>
+              <th>Dictamen</th>
+              <th>Turno</th>
+              <th>Horas Nom.</th>
+              <th>Horas Carga</th>
+              <th>Horas Descarga</th>
+              <th>Total Plazas</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% report.docentes.forEach((docente) => { %>
+              <tr>
+                <td><%= docente.rfc || '-' %></td>
+                <td><%= docente.numEmp || '-' %></td>
+                <td><%= docente.nombre || '-' %></td>
+                <td><%= docente.dictamen || '-' %></td>
+                <td><%= docente.turno || '-' %></td>
+                <td><%= docente.horasNombramiento || '-' %></td>
+                <td><%= docente.horasCarga || '-' %></td>
+                <td><%= docente.horasDescarga || '-' %></td>
+                <td><%= docente.plazas.length %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+
+    <% if (historicoReport) { %>
+      <h3>Resumen HISTORICO</h3>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <h3>Escuelas en HISTORICO</h3>
+          <p><%= historicoReport.summary.totalEscuelas %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Docentes identificados</h3>
+          <p><%= historicoReport.summary.totalDocentes %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Asignaturas historicas</h3>
+          <p><%= historicoReport.summary.totalAsignaturas %></p>
+        </article>
+      </div>
+
+      <h3>Vista previa de asignaturas historicas</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>RFC</th>
+              <th>Num. Empleado</th>
+              <th>Nombre</th>
+              <th>Ciclo</th>
+              <th>Asignatura</th>
+              <th>Carrera</th>
+              <th>Turno</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% historicoReport.subjectsPreview.forEach((item) => { %>
+              <tr>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.numEmp || '-' %></td>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.cicloDescripcion || '-' %></td>
+                <td><%= item.asignaturaDescripcion || '-' %></td>
+                <td><%= item.carreraDescripcion || '-' %></td>
+                <td><%= item.turno || '-' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% if (historicoReport.previewTruncated) { %>
+        <p>Se muestran los primeros 120 registros de asignaturas.</p>
+      <% } %>
+    <% } %>
+
     <div class="feature-list">
       <div class="feature-item">
         <h3>Consulta de indicadores</h3>

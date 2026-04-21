@@ -4,6 +4,7 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const methodOverride = require('method-override');
+const { DataTypes } = require('sequelize');
 
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -59,10 +60,40 @@ app.use((req, res) => {
 
 const PORT = Number(process.env.PORT || 3000);
 
+async function ensureSchemaCompatibility() {
+  const queryInterface = sequelize.getQueryInterface();
+  const tableName = 'xml_uploads';
+
+  try {
+    const columns = await queryInterface.describeTable(tableName);
+
+    if (!columns.uploadType) {
+      await queryInterface.addColumn(tableName, 'uploadType', {
+        type: DataTypes.ENUM('PXP', 'HISTORICO'),
+        allowNull: false,
+        defaultValue: 'PXP',
+      });
+    }
+
+    if (!columns.totalAsignaturas) {
+      await queryInterface.addColumn(tableName, 'totalAsignaturas', {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        defaultValue: 0,
+      });
+    }
+  } catch (error) {
+    if (error.name !== 'SequelizeDatabaseError') {
+      throw error;
+    }
+  }
+}
+
 async function start() {
   try {
     await sequelize.authenticate();
-    await sequelize.sync({ alter: true });
+    await sequelize.sync();
+    await ensureSchemaCompatibility();
     await normalizeMissingUsernames();
     await ensureAdminUser();
 
