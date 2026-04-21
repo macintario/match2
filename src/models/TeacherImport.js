@@ -53,12 +53,80 @@ const TeacherImport = sequelize.define(
       type: DataTypes.STRING(20),
       allowNull: true,
     },
+    horasNomDist: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    funciones: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    cargaReg: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    desReg: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    hrsXCub: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
     horasCarga: {
       type: DataTypes.STRING(20),
       allowNull: true,
     },
     horasDescarga: {
       type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    hrsCgAb1: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    hrsCgAb2: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    hrsCgAb3: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsCarga: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsCgAb1: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsCgAb2: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsCgAb3: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsDescarga: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsDesB1: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsDesB2: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    intHrsDesB3: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    cfOtraUa: {
+      type: DataTypes.STRING(255),
       allowNull: true,
     },
   },

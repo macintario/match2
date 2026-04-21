@@ -226,8 +226,25 @@ async function uploadAnalistaXml(req, res) {
               dictamen: docente.dictamen || null,
               turno: docente.turno || null,
               horasNombramiento: docente.horasNombramiento || null,
+              horasNomDist: docente.horasNomDist || null,
+              funciones: docente.funciones || null,
+              cargaReg: docente.cargaReg || null,
+              desReg: docente.desReg || null,
+              hrsXCub: docente.hrsXCub || null,
               horasCarga: docente.horasCarga || null,
               horasDescarga: docente.horasDescarga || null,
+              hrsCgAb1: docente.hrsCgAb1 || null,
+              hrsCgAb2: docente.hrsCgAb2 || null,
+              hrsCgAb3: docente.hrsCgAb3 || null,
+              intHrsCarga: docente.intHrsCarga || null,
+              intHrsCgAb1: docente.intHrsCgAb1 || null,
+              intHrsCgAb2: docente.intHrsCgAb2 || null,
+              intHrsCgAb3: docente.intHrsCgAb3 || null,
+              intHrsDescarga: docente.intHrsDescarga || null,
+              intHrsDesB1: docente.intHrsDesB1 || null,
+              intHrsDesB2: docente.intHrsDesB2 || null,
+              intHrsDesB3: docente.intHrsDesB3 || null,
+              cfOtraUa: docente.cfOtraUa || null,
             },
             { transaction }
           );
@@ -240,6 +257,9 @@ async function uploadAnalistaXml(req, res) {
             numeroPlaza: plaza.numeroPlaza || null,
             fechaInicio: plaza.fechaInicio || null,
             fechaFin: plaza.fechaFin || null,
+            status: plaza.status || null,
+            motivo: plaza.motivo || null,
+            observacion: plaza.observacion || null,
           }));
 
           if (positionRows.length > 0) {

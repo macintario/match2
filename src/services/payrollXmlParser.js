@@ -38,6 +38,9 @@ function parsePayrollXml(xmlContent) {
         numeroPlaza: readValue(plaza.PZA_NUM_PLAZA),
         fechaInicio: readValue(plaza.PZA_FEC_INI),
         fechaFin: readValue(plaza.PZA_FEC_FIN),
+        status: readValue(plaza.S),
+        motivo: readValue(plaza.MOT),
+        observacion: readValue(plaza.OBSER),
       }));
 
       return {
@@ -47,8 +50,25 @@ function parsePayrollXml(xmlContent) {
         dictamen: readValue(docente.DICTAMEN),
         turno: readValue(docente.DOC_TURNO),
         horasNombramiento: readValue(docente.HRS_NOM),
+        horasNomDist: readValue(docente.HRS_NOMDIST),
+        funciones: readValue(docente.FUNCIONES),
+        cargaReg: readValue(docente.CARGAREG),
+        desReg: readValue(docente.DESREG),
+        hrsXCub: readValue(docente.HRS_X_CUB),
         horasCarga: readValue(docente.HRSCARGA),
         horasDescarga: readValue(docente.HRSDESCARGA),
+        hrsCgAb1: readValue(docente.HRSCGAB1),
+        hrsCgAb2: readValue(docente.HRSCGAB2),
+        hrsCgAb3: readValue(docente.HRSCGAB3),
+        intHrsCarga: readValue(docente.INT_HRS_CARGA),
+        intHrsCgAb1: readValue(docente.INT_HRS_CGAB1),
+        intHrsCgAb2: readValue(docente.INT_HRS_CGAB2),
+        intHrsCgAb3: readValue(docente.INT_HRS_CGAB3),
+        intHrsDescarga: readValue(docente.INT_HRS_DESCARGA),
+        intHrsDesB1: readValue(docente.INT_HRS_DESB1),
+        intHrsDesB2: readValue(docente.INT_HRS_DESB2),
+        intHrsDesB3: readValue(docente.INT_HRS_DESB3),
+        cfOtraUa: readValue(docente.CF_OTRAUA),
         plazas,
       };
     });

@@ -1,14 +1,14 @@
 <header class="topbar">
-  <a href="/dashboard" class="brand">Control de Accesos</a>
+  <a href="<%= basePath %>/dashboard" class="brand">Control de Accesos</a>
 
   <% if (currentUser) { %>
     <nav class="topnav">
       <span class="badge"><%= currentUser.role %></span>
       <span class="username"><%= currentUser.name %></span>
       <% if (currentUser.role === 'admin') { %>
-        <a href="/admin/users">Usuarios</a>
+        <a href="<%= basePath %>/admin/users">Usuarios</a>
       <% } %>
-      <form action="/logout" method="POST" class="inline-form">
+      <form action="<%= basePath %>/logout" method="POST" class="inline-form">
         <button type="submit" class="btn btn-ghost">Cerrar sesion</button>
       </form>
     </nav>

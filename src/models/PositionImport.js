@@ -37,6 +37,18 @@ const PositionImport = sequelize.define(
       type: DataTypes.STRING(20),
       allowNull: true,
     },
+    status: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+    },
+    motivo: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    observacion: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
   },
   {
     tableName: 'position_imports',

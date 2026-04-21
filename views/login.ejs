@@ -9,7 +9,7 @@
       <div class="alert alert-<%= flash.type %>"><%= flash.text %></div>
     <% } %>
 
-    <form action="/login" method="POST" class="form-grid">
+    <form action="<%= basePath %>/login" method="POST" class="form-grid">
       <label>
         Usuario
         <input type="text" name="username" required />

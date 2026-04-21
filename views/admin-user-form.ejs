@@ -6,7 +6,7 @@
     <h1><%= formMode === 'create' ? 'Crear Usuario' : 'Editar Usuario' %></h1>
 
     <form
-      action="<%= formMode === 'create' ? '/admin/users' : '/admin/users/' + userData.id + '?_method=PUT' %>"
+      action="<%= formMode === 'create' ? basePath + '/admin/users' : basePath + '/admin/users/' + userData.id + '?_method=PUT' %>"
       method="POST"
       class="form-grid"
     >
@@ -63,7 +63,7 @@
       <% } %>
 
       <div class="row-actions">
-        <a href="/admin/users" class="btn btn-ghost">Cancelar</a>
+        <a href="<%= basePath %>/admin/users" class="btn btn-ghost">Cancelar</a>
         <button type="submit" class="btn btn-primary">Guardar</button>
       </div>
     </form>

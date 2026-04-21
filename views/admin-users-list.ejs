@@ -5,7 +5,7 @@
   <section class="card">
     <div class="row-between">
       <h1>Usuarios</h1>
-      <a href="/admin/users/new" class="btn btn-primary">Nuevo Usuario</a>
+      <a href="<%= basePath %>/admin/users/new" class="btn btn-primary">Nuevo Usuario</a>
     </div>
 
     <div class="table-wrap">
@@ -31,7 +31,7 @@
               <td><span class="badge"><%= user.role %></span></td>
               <td><%= user.active ? 'Si' : 'No' %></td>
               <td>
-                <a href="/admin/users/<%= user.id %>/edit" class="btn btn-ghost">Editar</a>
+                <a href="<%= basePath %>/admin/users/<%= user.id %>/edit" class="btn btn-ghost">Editar</a>
               </td>
             </tr>
           <% }) %>

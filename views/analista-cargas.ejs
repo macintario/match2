@@ -5,11 +5,11 @@
   <section class="card">
     <div class="row-between">
       <h1>Carga de archivos</h1>
-      <a href="/analista" class="btn btn-ghost">Volver al panel</a>
+      <a href="<%= basePath %>/analista" class="btn btn-ghost">Volver al panel</a>
     </div>
     <p>Sube los archivos fuente para actualizar la información del analista.</p>
 
-    <form action="/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid">
       <label>
         Cargar Plantilla (PxP) de docentes y plazas
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
@@ -19,7 +19,7 @@
       </div>
     </form>
 
-    <form action="/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid">
       <label>
         Cargar HISTORICO de asignaturas previas
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
@@ -29,7 +29,7 @@
       </div>
     </form>
 
-    <form action="/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid">
       <label>
         Cargar RUAA de horarios docentes
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
@@ -39,7 +39,7 @@
       </div>
     </form>
 
-    <form action="/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid">
       <label>
         Cargar MXG de horarios y horas solicitadas
         <strong>La columna con horas solicitadas debe llamarse "HRSNECESARIAS".</strong>

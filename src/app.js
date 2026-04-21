@@ -13,14 +13,16 @@ const { sequelize } = require('./models');
 const { normalizeMissingUsernames, ensureAdminUser } = require('./services/bootstrap');
 
 const app = express();
+const BASE_PATH = (process.env.APP_BASE_PATH || '/match2').replace(/\/$/, '');
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
+app.locals.basePath = BASE_PATH;
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(methodOverride('_method'));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(BASE_PATH, express.static(path.join(__dirname, '..', 'public')));
 
 app.use(
   session({
@@ -35,6 +37,15 @@ app.use(
 );
 
 app.use((req, res, next) => {
+  const originalRedirect = res.redirect.bind(res);
+  res.redirect = (url, ...args) => {
+    if (typeof url === 'string' && url.startsWith('/') && !url.startsWith(BASE_PATH)) {
+      return originalRedirect(`${BASE_PATH}${url}`, ...args);
+    }
+    return originalRedirect(url, ...args);
+  };
+
+  res.locals.basePath = BASE_PATH;
   res.locals.currentUser = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   delete req.session.flash;
@@ -42,17 +53,28 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
+  return res.redirect(`${BASE_PATH}/`);
+});
+
+app.get(BASE_PATH, (req, res) => {
   if (!req.session.user) {
     return res.redirect('/login');
   }
   return res.redirect('/dashboard');
 });
 
-app.use(authRoutes);
-app.use('/admin', adminRoutes);
-app.use(dashboardRoutes);
+app.get(`${BASE_PATH}/`, (req, res) => {
+  if (!req.session.user) {
+    return res.redirect('/login');
+  }
+  return res.redirect('/dashboard');
+});
 
-app.use((req, res) => {
+app.use(BASE_PATH, authRoutes);
+app.use(`${BASE_PATH}/admin`, adminRoutes);
+app.use(BASE_PATH, dashboardRoutes);
+
+app.use(BASE_PATH, (req, res) => {
   res.status(404).render('not-found', {
     title: 'Pagina no encontrada',
   });
@@ -112,6 +134,58 @@ async function ensureSchemaCompatibility() {
         defaultValue: 0,
       });
     }
+
+    // teacher_imports new columns
+    const teacherColumns = await queryInterface.describeTable('teacher_imports').catch(() => null);
+    if (teacherColumns) {
+      const teacherNewCols = {
+        horasNomDist: DataTypes.STRING(20),
+        funciones: DataTypes.STRING(255),
+        cargaReg: DataTypes.STRING(20),
+        desReg: DataTypes.STRING(20),
+        hrsXCub: DataTypes.STRING(20),
+        hrsCgAb1: DataTypes.STRING(20),
+        hrsCgAb2: DataTypes.STRING(20),
+        hrsCgAb3: DataTypes.STRING(20),
+        intHrsCarga: DataTypes.STRING(20),
+        intHrsCgAb1: DataTypes.STRING(20),
+        intHrsCgAb2: DataTypes.STRING(20),
+        intHrsCgAb3: DataTypes.STRING(20),
+        intHrsDescarga: DataTypes.STRING(20),
+        intHrsDesB1: DataTypes.STRING(20),
+        intHrsDesB2: DataTypes.STRING(20),
+        intHrsDesB3: DataTypes.STRING(20),
+        cfOtraUa: DataTypes.STRING(255),
+      };
+      for (const [colName, colType] of Object.entries(teacherNewCols)) {
+        if (!teacherColumns[colName]) {
+          await queryInterface.addColumn('teacher_imports', colName, {
+            type: colType,
+            allowNull: true,
+            defaultValue: null,
+          });
+        }
+      }
+    }
+
+    // position_imports new columns
+    const positionColumns = await queryInterface.describeTable('position_imports').catch(() => null);
+    if (positionColumns) {
+      const positionNewCols = {
+        status: DataTypes.STRING(10),
+        motivo: DataTypes.STRING(20),
+        observacion: DataTypes.STRING(255),
+      };
+      for (const [colName, colType] of Object.entries(positionNewCols)) {
+        if (!positionColumns[colName]) {
+          await queryInterface.addColumn('position_imports', colName, {
+            type: colType,
+            allowNull: true,
+            defaultValue: null,
+          });
+        }
+      }
+    }
   } catch (error) {
     if (error.name !== 'SequelizeDatabaseError') {
       throw error;
@@ -128,7 +202,7 @@ async function start() {
     await ensureAdminUser();
 
     app.listen(PORT, () => {
-      console.log(`Servidor iniciado en http://localhost:${PORT}`);
+      console.log(`Servidor iniciado en http://localhost:${PORT}${BASE_PATH}`);
     });
   } catch (error) {
     console.error('Error al iniciar la aplicacion:', error.message);
