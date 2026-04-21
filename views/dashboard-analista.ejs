@@ -3,48 +3,13 @@
 
 <main class="main-content">
   <section class="card">
-    <h1>Panel Analista</h1>
-    <p>Funciones habilitadas para el perfil Analista.</p>
-
-    <form action="/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid">
-      <label>
-        Cargar XML de docentes y plazas
-        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
-      </label>
-      <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar archivo</button>
+    <div class="row-between">
+      <div>
+        <h1>Panel Analista</h1>
+        <p>Funciones habilitadas para el perfil Analista.</p>
       </div>
-    </form>
-
-    <form action="/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid">
-      <label>
-        Cargar HISTORICO.xml de asignaturas previas
-        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
-      </label>
-      <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar HISTORICO</button>
-      </div>
-    </form>
-
-    <form action="/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid">
-      <label>
-        Cargar RUAA.xml de horarios docentes
-        <input type="file" name="xmlFile" accept=".xml,text/xml,application/xml" required />
-      </label>
-      <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar RUAA</button>
-      </div>
-    </form>
-
-    <form action="/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid">
-      <label>
-        Cargar MXG.xlsx de horarios y horas adicionales
-        <input type="file" name="xmlFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
-      </label>
-      <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar MXG</button>
-      </div>
-    </form>
+      <a href="/analista/cargas" class="btn btn-primary">Ir a carga de archivos</a>
+    </div>
 
     <h3>Registro de cargas</h3>
     <div class="table-wrap">
@@ -87,6 +52,45 @@
               <td><%= upload.totalSolicitudesAdicionales || 0 %></td>
             </tr>
           <% }) %>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>
+      Reporte de horas solicitadas por academia
+      <% if (escuelaHorasSolicitadas) { %>
+        - <%= escuelaHorasSolicitadas %>
+      <% } %>
+    </h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Academia</th>
+            <th>Solicitudes</th>
+            <th>Horas solicitadas</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!horasSolicitadasPorAcademia || horasSolicitadasPorAcademia.length === 0) { %>
+            <tr>
+              <td colspan="3">No hay solicitudes de horas adicionales para reportar.</td>
+            </tr>
+          <% } %>
+          <% (horasSolicitadasPorAcademia || []).forEach((item) => { %>
+            <tr>
+              <td><%= item.academiaDesc %></td>
+              <td><%= item.totalSolicitudes %></td>
+              <td><%= item.totalHorasSolicitadas %></td>
+            </tr>
+          <% }) %>
+          <% if (horasSolicitadasPorAcademia && horasSolicitadasPorAcademia.length > 0) { %>
+            <tr>
+              <td><strong>Total general</strong></td>
+              <td><strong><%= horasSolicitadasTotales.totalSolicitudes %></strong></td>
+              <td><strong><%= horasSolicitadasTotales.totalHorasSolicitadas %></strong></td>
+            </tr>
+          <% } %>
         </tbody>
       </table>
     </div>

@@ -1,4 +1,5 @@
 const { XMLValidator } = require('fast-xml-parser');
+const { Op, fn, col } = require('sequelize');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
 const { parseMxgWorkbook } = require('../services/mxgParser');
 const {
@@ -27,6 +28,52 @@ function decodeXmlBuffer(buffer) {
   return buffer.toString('utf8');
 }
 
+function isAllowedXmlFilename(fileName) {
+  return /\.(xml|xls)$/i.test(fileName || '');
+}
+
+async function purgePreviousUploadByType(uploadType, transaction) {
+  const previousUploads = await XmlUpload.findAll({
+    where: { uploadType },
+    attributes: ['id'],
+    transaction,
+  });
+
+  if (!previousUploads.length) {
+    return;
+  }
+
+  const uploadIds = previousUploads.map((item) => item.id);
+
+  if (uploadType === 'PXP') {
+    await PositionImport.destroy({ where: { uploadId: { [Op.in]: uploadIds } }, transaction });
+    await TeacherImport.destroy({ where: { uploadId: { [Op.in]: uploadIds } }, transaction });
+  }
+
+  if (uploadType === 'HISTORICO') {
+    await HistoricalSubjectImport.destroy({
+      where: { uploadId: { [Op.in]: uploadIds } },
+      transaction,
+    });
+  }
+
+  if (uploadType === 'RUAA') {
+    await RuaaScheduleImport.destroy({
+      where: { uploadId: { [Op.in]: uploadIds } },
+      transaction,
+    });
+  }
+
+  if (uploadType === 'MXG') {
+    await MxgScheduleImport.destroy({
+      where: { uploadId: { [Op.in]: uploadIds } },
+      transaction,
+    });
+  }
+
+  await XmlUpload.destroy({ where: { id: { [Op.in]: uploadIds } }, transaction });
+}
+
 function redirectByRole(req, res) {
   const { role } = req.session.user;
 
@@ -52,13 +99,75 @@ async function analistaDashboard(req, res) {
     include: [{ model: User, attributes: ['id', 'name', 'username'] }],
   });
 
+  const latestMxgUpload = await XmlUpload.findOne({
+    where: { uploadType: 'MXG' },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id'],
+  });
+
+  let horasSolicitadasPorAcademia = [];
+  let horasSolicitadasTotales = {
+    totalSolicitudes: 0,
+    totalHorasSolicitadas: 0,
+  };
+  let escuelaHorasSolicitadas = null;
+  if (latestMxgUpload) {
+    const anyMxgRow = await MxgScheduleImport.findOne({
+      where: { uploadId: latestMxgUpload.id },
+      attributes: ['plantelDesc', 'plantelId'],
+    });
+
+    if (anyMxgRow) {
+      const plantelId = anyMxgRow.get('plantelId');
+      const plantelDesc = anyMxgRow.get('plantelDesc');
+      escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
+    }
+
+    const groupedRows = await MxgScheduleImport.findAll({
+      where: {
+        uploadId: latestMxgUpload.id,
+        needsAdditionalHours: true,
+      },
+      attributes: [
+        'academiaDesc',
+        [fn('COUNT', col('id')), 'totalSolicitudes'],
+        [fn('SUM', col('hrsNecesarias')), 'totalHorasSolicitadas'],
+      ],
+      group: ['academiaDesc'],
+      order: [[fn('SUM', col('hrsNecesarias')), 'DESC']],
+    });
+
+    horasSolicitadasPorAcademia = groupedRows.map((row) => ({
+      academiaDesc: row.get('academiaDesc') || 'Sin academia',
+      totalSolicitudes: Number(row.get('totalSolicitudes') || 0),
+      totalHorasSolicitadas: Number(row.get('totalHorasSolicitadas') || 0),
+    }));
+
+    horasSolicitadasTotales = horasSolicitadasPorAcademia.reduce(
+      (acc, item) => ({
+        totalSolicitudes: acc.totalSolicitudes + item.totalSolicitudes,
+        totalHorasSolicitadas: acc.totalHorasSolicitadas + item.totalHorasSolicitadas,
+      }),
+      { totalSolicitudes: 0, totalHorasSolicitadas: 0 }
+    );
+  }
+
   return res.render('dashboard-analista', {
     title: 'Panel Analista',
     report,
     historicoReport,
     ruaaReport,
     mxgReport,
+    horasSolicitadasPorAcademia,
+    horasSolicitadasTotales,
+    escuelaHorasSolicitadas,
     recentUploads,
+  });
+}
+
+function analistaUploadPage(req, res) {
+  return res.render('analista-cargas', {
+    title: 'Carga de Archivos',
   });
 }
 
@@ -69,8 +178,8 @@ async function uploadAnalistaXml(req, res) {
       return res.redirect('/analista');
     }
 
-    if (!/\.xml$/i.test(req.file.originalname || '')) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml.');
+    if (!isAllowedXmlFilename(req.file.originalname)) {
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
       return res.redirect('/analista');
     }
 
@@ -84,6 +193,8 @@ async function uploadAnalistaXml(req, res) {
     const report = parsePayrollXml(xmlContent);
 
     await sequelize.transaction(async (transaction) => {
+      await purgePreviousUploadByType('PXP', transaction);
+
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -158,8 +269,8 @@ async function uploadAnalistaHistoricoXml(req, res) {
       return res.redirect('/analista');
     }
 
-    if (!/\.xml$/i.test(req.file.originalname || '')) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml.');
+    if (!isAllowedXmlFilename(req.file.originalname)) {
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
       return res.redirect('/analista');
     }
 
@@ -173,6 +284,8 @@ async function uploadAnalistaHistoricoXml(req, res) {
     const historico = parseHistoricoXml(xmlContent);
 
     await sequelize.transaction(async (transaction) => {
+      await purgePreviousUploadByType('HISTORICO', transaction);
+
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -238,8 +351,8 @@ async function uploadAnalistaRuaaXml(req, res) {
       return res.redirect('/analista');
     }
 
-    if (!/\.xml$/i.test(req.file.originalname || '')) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml.');
+    if (!isAllowedXmlFilename(req.file.originalname)) {
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
       return res.redirect('/analista');
     }
 
@@ -253,6 +366,8 @@ async function uploadAnalistaRuaaXml(req, res) {
     const ruaa = parseRuaaXml(xmlContent);
 
     await sequelize.transaction(async (transaction) => {
+      await purgePreviousUploadByType('RUAA', transaction);
+
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -367,6 +482,8 @@ async function uploadAnalistaMxg(req, res) {
     const mxg = parseMxgWorkbook(req.file.buffer);
 
     await sequelize.transaction(async (transaction) => {
+      await purgePreviousUploadByType('MXG', transaction);
+
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -446,6 +563,7 @@ function escuelaDashboard(req, res) {
 module.exports = {
   redirectByRole,
   analistaDashboard,
+  analistaUploadPage,
   uploadAnalistaXml,
   uploadAnalistaHistoricoXml,
   uploadAnalistaRuaaXml,

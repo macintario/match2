@@ -66,18 +66,22 @@ function parseMxgWorkbook(buffer) {
     };
   });
 
-  const docentesUnicos = new Set(
-    normalizedRows.map((item) => `${item.rfc}|${item.numEmp}|${item.nombre}`)
+  const validRows = normalizedRows.filter(
+    (item) => item.asignaturaDesc.trim() !== '' && item.academiaDesc.trim() !== ''
   );
-  const additionalRequests = normalizedRows.filter((item) => item.needsAdditionalHours);
+
+  const docentesUnicos = new Set(
+    validRows.map((item) => `${item.rfc}|${item.numEmp}|${item.nombre}`)
+  );
+  const additionalRequests = validRows.filter((item) => item.needsAdditionalHours);
 
   return {
     summary: {
-      totalRegistros: normalizedRows.length,
+      totalRegistros: validRows.length,
       totalDocentes: docentesUnicos.size,
       totalSolicitudesAdicionales: additionalRequests.length,
     },
-    rows: normalizedRows,
+    rows: validRows,
     additionalRequests,
   };
 }
