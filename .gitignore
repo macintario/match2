@@ -32,3 +32,8 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+
+#archivos excel de MATCH
+MATCHfiles/
+*.xlsx
+*.xls
