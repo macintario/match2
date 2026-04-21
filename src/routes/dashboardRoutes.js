@@ -20,7 +20,7 @@ function handleXmlUpload(req, res, next) {
 
 		req.session.flash = {
 			type: 'error',
-			text: `No se pudo cargar el archivo XML. Verifica que pese menos de ${maxXmlUploadMb}MB.`,
+			text: `No se pudo cargar el archivo. Verifica que pese menos de ${maxXmlUploadMb}MB.`,
 		};
 		return res.redirect('/analista');
 	});
@@ -48,6 +48,13 @@ router.post(
 	requireRole(['analista']),
 	handleXmlUpload,
 	dashboardController.uploadAnalistaRuaaXml
+);
+router.post(
+	'/analista/upload-mxg',
+	ensureAuth,
+	requireRole(['analista']),
+	handleXmlUpload,
+	dashboardController.uploadAnalistaMxg
 );
 router.get('/escuela', ensureAuth, requireRole(['escuela']), dashboardController.escuelaDashboard);
 

@@ -69,13 +69,13 @@ async function ensureSchemaCompatibility() {
 
     if (!columns.uploadType) {
       await queryInterface.addColumn(tableName, 'uploadType', {
-        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA'),
+        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA', 'MXG'),
         allowNull: false,
         defaultValue: 'PXP',
       });
     } else {
       await queryInterface.changeColumn(tableName, 'uploadType', {
-        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA'),
+        type: DataTypes.ENUM('PXP', 'HISTORICO', 'RUAA', 'MXG'),
         allowNull: false,
         defaultValue: 'PXP',
       });
@@ -99,6 +99,14 @@ async function ensureSchemaCompatibility() {
 
     if (!columns.totalActividades) {
       await queryInterface.addColumn(tableName, 'totalActividades', {
+        type: DataTypes.INTEGER.UNSIGNED,
+        allowNull: false,
+        defaultValue: 0,
+      });
+    }
+
+    if (!columns.totalSolicitudesAdicionales) {
+      await queryInterface.addColumn(tableName, 'totalSolicitudesAdicionales', {
         type: DataTypes.INTEGER.UNSIGNED,
         allowNull: false,
         defaultValue: 0,

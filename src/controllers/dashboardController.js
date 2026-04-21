@@ -1,11 +1,13 @@
 const { XMLValidator } = require('fast-xml-parser');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
+const { parseMxgWorkbook } = require('../services/mxgParser');
 const {
   XmlUpload,
   TeacherImport,
   PositionImport,
   HistoricalSubjectImport,
   RuaaScheduleImport,
+  MxgScheduleImport,
   User,
   sequelize,
 } = require('../models');
@@ -43,6 +45,7 @@ async function analistaDashboard(req, res) {
   const report = req.session.analistaXmlReport || null;
   const historicoReport = req.session.analistaHistoricoReport || null;
   const ruaaReport = req.session.analistaRuaaReport || null;
+  const mxgReport = req.session.analistaMxgReport || null;
   const recentUploads = await XmlUpload.findAll({
     order: [['uploadedAt', 'DESC']],
     limit: 20,
@@ -54,6 +57,7 @@ async function analistaDashboard(req, res) {
     report,
     historicoReport,
     ruaaReport,
+    mxgReport,
     recentUploads,
   });
 }
@@ -91,6 +95,7 @@ async function uploadAnalistaXml(req, res) {
           totalAsignaturas: 0,
           totalHorarios: 0,
           totalActividades: 0,
+          totalSolicitudesAdicionales: 0,
         },
         { transaction }
       );
@@ -179,6 +184,7 @@ async function uploadAnalistaHistoricoXml(req, res) {
           totalAsignaturas: historico.summary.totalAsignaturas,
           totalHorarios: 0,
           totalActividades: 0,
+          totalSolicitudesAdicionales: 0,
         },
         { transaction }
       );
@@ -258,6 +264,7 @@ async function uploadAnalistaRuaaXml(req, res) {
           totalAsignaturas: 0,
           totalHorarios: ruaa.summary.totalHorarios,
           totalActividades: ruaa.summary.totalActividades,
+          totalSolicitudesAdicionales: 0,
         },
         { transaction }
       );
@@ -345,6 +352,91 @@ async function uploadAnalistaRuaaXml(req, res) {
   }
 }
 
+async function uploadAnalistaMxg(req, res) {
+  try {
+    if (!req.file) {
+      setFlash(req, 'error', 'Debes seleccionar un archivo MXG.xlsx.');
+      return res.redirect('/analista');
+    }
+
+    if (!/\.xlsx$/i.test(req.file.originalname || '')) {
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xlsx para MXG.');
+      return res.redirect('/analista');
+    }
+
+    const mxg = parseMxgWorkbook(req.file.buffer);
+
+    await sequelize.transaction(async (transaction) => {
+      const upload = await XmlUpload.create(
+        {
+          userId: req.session.user.id,
+          originalFileName: req.file.originalname,
+          uploadType: 'MXG',
+          totalEscuelas: 0,
+          totalDocentes: mxg.summary.totalDocentes,
+          totalPlazas: 0,
+          totalAsignaturas: 0,
+          totalHorarios: mxg.summary.totalRegistros,
+          totalActividades: 0,
+          totalSolicitudesAdicionales: mxg.summary.totalSolicitudesAdicionales,
+        },
+        { transaction }
+      );
+
+      const chunkSize = 1000;
+      for (let i = 0; i < mxg.rows.length; i += chunkSize) {
+        const chunk = mxg.rows.slice(i, i + chunkSize).map((item) => ({
+          uploadId: upload.id,
+          modalidad: item.modalidad || null,
+          plantelId: item.plantelId || null,
+          plantelDesc: item.plantelDesc || null,
+          cicloId: item.cicloId || null,
+          carreraId: item.carreraId || null,
+          carreraDesc: item.carreraDesc || null,
+          planEstudio: item.planEstudio || null,
+          grupo: item.grupo || null,
+          turno: item.turno || null,
+          asignaturaId: item.asignaturaId || null,
+          asignaturaDesc: item.asignaturaDesc || null,
+          academiaDesc: item.academiaDesc || null,
+          numEmp: item.numEmp || null,
+          rfc: item.rfc || null,
+          nombre: item.nombre || null,
+          hrsAsig: item.hrsAsig,
+          hrsNecesarias: item.hrsNecesarias,
+          needsAdditionalHours: item.needsAdditionalHours,
+          lunes: item.lunes || null,
+          martes: item.martes || null,
+          miercoles: item.miercoles || null,
+          jueves: item.jueves || null,
+          viernes: item.viernes || null,
+          sabado: item.sabado || null,
+          incidencia: item.incidencia || null,
+        }));
+        await MxgScheduleImport.bulkCreate(chunk, { transaction });
+      }
+    });
+
+    req.session.analistaMxgReport = {
+      summary: mxg.summary,
+      rowsPreview: mxg.rows.slice(0, 120),
+      additionalPreview: mxg.additionalRequests.slice(0, 120),
+      previewTruncated:
+        mxg.rows.length > 120 || mxg.additionalRequests.length > 120,
+    };
+
+    setFlash(
+      req,
+      'success',
+      `MXG procesado: ${mxg.summary.totalRegistros} horarios y ${mxg.summary.totalSolicitudesAdicionales} solicitudes de horas adicionales.`
+    );
+    return res.redirect('/analista');
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo procesar MXG.xlsx: ${error.message}`);
+    return res.redirect('/analista');
+  }
+}
+
 function escuelaDashboard(req, res) {
   return res.render('dashboard-escuela', {
     title: 'Panel Escuela',
@@ -357,5 +449,6 @@ module.exports = {
   uploadAnalistaXml,
   uploadAnalistaHistoricoXml,
   uploadAnalistaRuaaXml,
+  uploadAnalistaMxg,
   escuelaDashboard,
 };

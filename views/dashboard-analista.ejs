@@ -36,6 +36,16 @@
       </div>
     </form>
 
+    <form action="/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid">
+      <label>
+        Cargar MXG.xlsx de horarios y horas adicionales
+        <input type="file" name="xmlFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn btn-primary">Procesar MXG</button>
+      </div>
+    </form>
+
     <h3>Registro de cargas</h3>
     <div class="table-wrap">
       <table>
@@ -52,12 +62,13 @@
             <th>Asignaturas</th>
             <th>Horarios</th>
             <th>Actividades</th>
+            <th>Solicitudes Hrs Adic.</th>
           </tr>
         </thead>
         <tbody>
           <% if (!recentUploads || recentUploads.length === 0) { %>
             <tr>
-              <td colspan="11">Aun no hay cargas registradas.</td>
+              <td colspan="12">Aun no hay cargas registradas.</td>
             </tr>
           <% } %>
           <% (recentUploads || []).forEach((upload) => { %>
@@ -73,6 +84,7 @@
               <td><%= upload.totalAsignaturas || 0 %></td>
               <td><%= upload.totalHorarios || 0 %></td>
               <td><%= upload.totalActividades || 0 %></td>
+              <td><%= upload.totalSolicitudesAdicionales || 0 %></td>
             </tr>
           <% }) %>
         </tbody>
@@ -138,6 +150,64 @@
           </tbody>
         </table>
       </div>
+    <% } %>
+
+    <% if (mxgReport) { %>
+      <h3>Resumen MXG</h3>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <h3>Registros de horario</h3>
+          <p><%= mxgReport.summary.totalRegistros %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Docentes en MXG</h3>
+          <p><%= mxgReport.summary.totalDocentes %></p>
+        </article>
+        <article class="stat-card">
+          <h3>Solicitudes de horas</h3>
+          <p><%= mxgReport.summary.totalSolicitudesAdicionales %></p>
+        </article>
+      </div>
+
+      <h3>Solicitudes de horas adicionales (HRSNECESARIAS != 0)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>RFC</th>
+              <th>Docente</th>
+              <th>Asignatura</th>
+              <th>Grupo</th>
+              <th>Horas necesarias</th>
+              <th>Lunes</th>
+              <th>Martes</th>
+              <th>Miercoles</th>
+              <th>Jueves</th>
+              <th>Viernes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% mxgReport.additionalPreview.forEach((item) => { %>
+              <tr>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.asignaturaDesc || '-' %></td>
+                <td><%= item.grupo || '-' %></td>
+                <td><%= item.hrsNecesarias %></td>
+                <td><%= item.lunes || '-' %></td>
+                <td><%= item.martes || '-' %></td>
+                <td><%= item.miercoles || '-' %></td>
+                <td><%= item.jueves || '-' %></td>
+                <td><%= item.viernes || '-' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <% if (mxgReport.previewTruncated) { %>
+        <p>Se muestran los primeros 120 registros de MXG en cada tabla.</p>
+      <% } %>
     <% } %>
 
     <% if (historicoReport) { %>
