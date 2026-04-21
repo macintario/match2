@@ -152,6 +152,49 @@ async function analistaDashboard(req, res) {
     );
   }
 
+  // Histograma hrsXCub de la última carga PXP (intervalos de 2 horas)
+  let hrsXCubHistogram = [];
+  const latestPxpUpload = await XmlUpload.findOne({
+    where: { uploadType: 'PXP' },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id'],
+  });
+  if (latestPxpUpload) {
+    // Filas numéricas agrupadas en intervalos de 2 h
+    const freqRows = await TeacherImport.findAll({
+      where: {
+        uploadId: latestPxpUpload.id,
+        hrsXCub: { [Op.regexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
+      },
+      attributes: [
+        [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'intervaloBase'],
+        [fn('COUNT', col('id')), 'cantidad'],
+      ],
+      group: [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2'))],
+      order: [[fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'ASC']],
+    });
+
+    hrsXCubHistogram = freqRows.map((row) => {
+      const base = Number(row.get('intervaloBase')) * 2;
+      return {
+        valor: `${base} a ${base + 1}`,
+        base,
+        cantidad: Number(row.get('cantidad') || 0),
+      };
+    });
+
+    // Filas no numéricas (vacías u otro texto)
+    const nonNumericCount = await TeacherImport.count({
+      where: {
+        uploadId: latestPxpUpload.id,
+        hrsXCub: { [Op.notRegexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
+      },
+    });
+    if (nonNumericCount > 0) {
+      hrsXCubHistogram.push({ valor: '(sin valor)', base: null, cantidad: nonNumericCount });
+    }
+  }
+
   return res.render('dashboard-analista', {
     title: 'Panel Analista',
     report,
@@ -162,6 +205,7 @@ async function analistaDashboard(req, res) {
     horasSolicitadasTotales,
     escuelaHorasSolicitadas,
     recentUploads,
+    hrsXCubHistogram,
   });
 }
 
