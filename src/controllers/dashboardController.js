@@ -146,15 +146,30 @@ function buildMxgHeatmap(rows) {
     days.map((_, dayIndex) => slotSetsByDay[dayIndex][slotIndex].size)
   );
 
+  const sabadoIndex = days.findIndex((day) => day.key === 'sabado');
+  if (sabadoIndex >= 0) {
+    const hasSaturdayUsage = matrix.some((row) => row[sabadoIndex] > 0);
+    if (!hasSaturdayUsage) {
+      days.splice(sabadoIndex, 1);
+      matrix.forEach((row) => row.splice(sabadoIndex, 1));
+    }
+  }
+
   const maxCount = matrix.reduce(
     (acc, row) => Math.max(acc, ...row),
     0
+  );
+
+  const minCount = matrix.reduce(
+    (acc, row) => Math.min(acc, ...row),
+    Number.POSITIVE_INFINITY
   );
 
   return {
     days,
     slotLabels,
     matrix,
+    minCount: Number.isFinite(minCount) ? minCount : 0,
     maxCount,
   };
 }

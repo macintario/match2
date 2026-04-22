@@ -107,6 +107,7 @@
     <% if (mxgHeatmap && mxgHeatmap.slotLabels && mxgHeatmap.slotLabels.length > 0) { %>
       <h3>Mapa de calor de grupos activos (MXG)</h3>
       <p>Intervalos de 30 minutos desde 07:00 hasta 22:00 hrs.</p>
+      <p><strong>Leyenda:</strong> Rojo = menor uso de espacios, Verde = mayor uso de espacios.</p>
       <div class="table-wrap">
         <table class="heatmap-table">
           <thead>
@@ -123,11 +124,17 @@
                 <td class="heatmap-hour"><%= slot %></td>
                 <% mxgHeatmap.days.forEach((day, dayIndex) => {
                   const count = mxgHeatmap.matrix[slotIndex][dayIndex];
-                  const intensity = mxgHeatmap.maxCount ? (count / mxgHeatmap.maxCount) : 0;
-                  const alpha = (0.08 + intensity * 0.72).toFixed(2);
-                  const textColor = intensity >= 0.55 ? '#fff' : '#2b1d22';
+                  const minVisible = Number(mxgHeatmap.minCount || 0);
+                  const maxVisible = Number(mxgHeatmap.maxCount || 0);
+                  const spread = Math.max(0, maxVisible - minVisible);
+                  const intensity = spread > 0 ? ((count - minVisible) / spread) : 0;
+                  const hue = Math.round(intensity * 120); // 0=rojo, 120=verde
+                  const saturation = 78;
+                  const lightness = Math.round(92 - intensity * 52);
+                  const bgColor = `hsl(${hue} ${saturation}% ${lightness}%)`;
+                  const textColor = intensity >= 0.62 ? '#ffffff' : '#2b1d22';
                 %>
-                  <td style="background-color: rgba(107, 23, 53, <%= alpha %>); color: <%= textColor %>; text-align: center; font-weight: 600;"><%= count %></td>
+                  <td style="background-color: <%= bgColor %>; color: <%= textColor %>; text-align: center; font-weight: 600;"><%= count %></td>
                 <% }) %>
               </tr>
             <% }) %>
