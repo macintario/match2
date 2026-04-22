@@ -1,0 +1,118 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <div class="row-between">
+      <div>
+        <h1>Propuestas de Sustitucion</h1>
+        <p>Generacion y seguimiento de propuestas para cubrir horas solicitadas en MXG.</p>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+        <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
+        <form method="post" action="<%= basePath %>/analista/generar-propuestas" style="margin:0;">
+          <button type="submit" class="btn btn-primary">Generar propuestas de sustitucion</button>
+        </form>
+      </div>
+    </div>
+
+    <% if (proposalGenerationReport) { %>
+      <div class="feature-item" style="margin-top:10px;">
+        <p>
+          Ultima ejecucion: <strong><%= proposalGenerationReport.totalPropuestas %></strong> propuestas,
+          <strong><%= proposalGenerationReport.totalHorasAsignadas.toFixed(2) %></strong> horas asignadas,
+          conflictos de turno: <strong><%= proposalGenerationReport.conflictosTurno %></strong>,
+          conflictos de horario: <strong><%= proposalGenerationReport.conflictosHorario %></strong>.
+        </p>
+      </div>
+    <% } %>
+
+    <h3>Propuestas de sustitucion (MXG vs docentes con hrsXCub &gt; 0)</h3>
+    <div style="margin-bottom:10px;">
+      <a href="<%= basePath %>/analista/propuestas/export-csv" class="btn btn-secondary">Descargar propuestas CSV</a>
+    </div>
+
+    <div class="stats-grid">
+      <article class="stat-card">
+        <h3>Total propuestas</h3>
+        <p><%= (proposalSummary && proposalSummary.totalPropuestas) || 0 %></p>
+      </article>
+      <article class="stat-card">
+        <h3>Horas asignadas</h3>
+        <p><%= ((proposalSummary && proposalSummary.totalHorasAsignadas) || 0).toFixed(2) %></p>
+      </article>
+      <article class="stat-card">
+        <h3>Conflictos reportados</h3>
+        <p>
+          T: <%= (proposalSummary && proposalSummary.conflictosTurno) || 0 %>
+          | H: <%= (proposalSummary && proposalSummary.conflictosHorario) || 0 %>
+        </p>
+      </article>
+      <article class="stat-card">
+        <h3>Estados</h3>
+        <p>
+          P: <%= (proposalSummary && proposalSummary.pendientes) || 0 %>
+          | A: <%= (proposalSummary && proposalSummary.aceptadas) || 0 %>
+          | R: <%= (proposalSummary && proposalSummary.rechazadas) || 0 %>
+        </p>
+      </article>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Docente propuesto</th>
+            <th>Asignatura solicitada</th>
+            <th>Grupo</th>
+            <th>Turno solicitud</th>
+            <th>Horas asignadas</th>
+            <th>Restante solicitud</th>
+            <th>Tipo match</th>
+            <th>Similitud</th>
+            <th>Estado</th>
+            <th>Conflicto turno</th>
+            <th>Conflicto horario</th>
+            <th>Detalle</th>
+            <th>Accion</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!recentProposals || recentProposals.length === 0) { %>
+            <tr>
+              <td colspan="13">Aun no hay propuestas guardadas.</td>
+            </tr>
+          <% } %>
+          <% (recentProposals || []).forEach((item) => { %>
+            <tr>
+              <td><%= item.teacherNombre || '-' %> (<%= item.teacherNumEmp || '-' %>)</td>
+              <td><%= item.requestSubjectDesc || '-' %></td>
+              <td><%= item.requestGroup || '-' %></td>
+              <td><%= item.requestTurno || '-' %></td>
+              <td><%= Number(item.assignedHours || 0).toFixed(2) %></td>
+              <td><%= Number(item.requestRemainingHours || 0).toFixed(2) %></td>
+              <td><%= item.subjectMatchType %></td>
+              <td><%= Number(item.subjectSimilarity || 0).toFixed(3) %></td>
+              <td><%= item.proposalStatus || 'PENDIENTE' %></td>
+              <td><%= item.hasTurnoConflict ? 'Si' : 'No' %></td>
+              <td><%= item.hasHorarioConflict ? 'Si' : 'No' %></td>
+              <td><%= item.conflictDetails || '-' %></td>
+              <td>
+                <form method="post" action="<%= basePath %>/analista/propuestas/<%= item.id %>/estado" style="display:flex; gap:6px; margin:0;">
+                  <select name="status">
+                    <option value="PENDIENTE" <%= item.proposalStatus === 'PENDIENTE' ? 'selected' : '' %>>PENDIENTE</option>
+                    <option value="ACEPTADA" <%= item.proposalStatus === 'ACEPTADA' ? 'selected' : '' %>>ACEPTADA</option>
+                    <option value="RECHAZADA" <%= item.proposalStatus === 'RECHAZADA' ? 'selected' : '' %>>RECHAZADA</option>
+                  </select>
+                  <button type="submit" class="btn btn-secondary">Guardar</button>
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<%- include('partials/foot') %>

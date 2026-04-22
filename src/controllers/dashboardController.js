@@ -103,8 +103,6 @@ async function analistaDashboard(req, res) {
   const historicoReport = req.session.analistaHistoricoReport || null;
   const ruaaReport = req.session.analistaRuaaReport || null;
   const mxgReport = req.session.analistaMxgReport || null;
-  const proposalGenerationReport = req.session.proposalGenerationReport || null;
-  delete req.session.proposalGenerationReport;
   const recentUploads = await XmlUpload.findAll({
     order: [['uploadedAt', 'DESC']],
     limit: 20,
@@ -207,6 +205,24 @@ async function analistaDashboard(req, res) {
     }
   }
 
+  return res.render('dashboard-analista', {
+    title: 'Panel Analista',
+    report,
+    historicoReport,
+    ruaaReport,
+    mxgReport,
+    horasSolicitadasPorAcademia,
+    horasSolicitadasTotales,
+    escuelaHorasSolicitadas,
+    recentUploads,
+    hrsXCubHistogram,
+  });
+}
+
+async function analistaProposalsPage(req, res) {
+  const proposalGenerationReport = req.session.proposalGenerationReport || null;
+  delete req.session.proposalGenerationReport;
+
   const recentProposals = await SubstitutionProposal.findAll({
     order: [['createdAt', 'DESC']],
     limit: 200,
@@ -243,17 +259,8 @@ async function analistaDashboard(req, res) {
     }
   );
 
-  return res.render('dashboard-analista', {
-    title: 'Panel Analista',
-    report,
-    historicoReport,
-    ruaaReport,
-    mxgReport,
-    horasSolicitadasPorAcademia,
-    horasSolicitadasTotales,
-    escuelaHorasSolicitadas,
-    recentUploads,
-    hrsXCubHistogram,
+  return res.render('analista-propuestas', {
+    title: 'Propuestas de Sustitucion',
     recentProposals,
     proposalSummary,
     proposalGenerationReport,
@@ -275,7 +282,7 @@ async function generateAnalistaSubstitutionProposals(req, res) {
         'error',
         'Para generar propuestas necesitas cargar primero MXG, PxP, HISTORICO y RUAA.'
       );
-      return res.redirect('/analista');
+      return res.redirect('/analista/propuestas');
     }
 
     const [mxgRequests, teachers, historicalRows, ruaaRows] = await Promise.all([
@@ -352,10 +359,10 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       'success',
       `Propuestas generadas: ${totals.totalPropuestas} | Horas asignadas: ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno: ${totals.conflictosTurno} | Conflictos horario: ${totals.conflictosHorario}.`
     );
-    return res.redirect('/analista');
+    return res.redirect('/analista/propuestas');
   } catch (error) {
     setFlash(req, 'error', `No se pudieron generar propuestas: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/propuestas');
   }
 }
 
@@ -367,7 +374,7 @@ async function updateProposalStatus(req, res) {
 
     if (!Number.isInteger(proposalId) || proposalId <= 0 || !allowed.includes(nextStatus)) {
       setFlash(req, 'error', 'Solicitud invalida para cambiar el estado de propuesta.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/propuestas');
     }
 
     const [updated] = await SubstitutionProposal.update(
@@ -377,14 +384,14 @@ async function updateProposalStatus(req, res) {
 
     if (!updated) {
       setFlash(req, 'error', 'No se encontro la propuesta a actualizar.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/propuestas');
     }
 
     setFlash(req, 'success', `Estado actualizado a ${nextStatus}.`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/propuestas');
   } catch (error) {
     setFlash(req, 'error', `No se pudo actualizar el estado: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/propuestas');
   }
 }
 
@@ -430,7 +437,7 @@ async function exportSubstitutionProposalsCsv(req, res) {
     return res.send(`\uFEFF${lines.join('\n')}`);
   } catch (error) {
     setFlash(req, 'error', `No se pudo exportar CSV: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/propuestas');
   }
 }
 
@@ -852,6 +859,7 @@ function escuelaDashboard(req, res) {
 module.exports = {
   redirectByRole,
   analistaDashboard,
+  analistaProposalsPage,
   analistaUploadPage,
   uploadAnalistaXml,
   uploadAnalistaHistoricoXml,

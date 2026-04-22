@@ -1,5 +1,5 @@
 <header class="topbar">
-  <a href="<%= basePath %>/dashboard" class="brand">Control de Accesos</a>
+  <a href="<%= basePath %>/dashboard" class="brand">Match-2</a>
 
   <% if (currentUser) { %>
     <nav class="topnav">
@@ -9,7 +9,7 @@
         <a href="<%= basePath %>/admin/users">Usuarios</a>
       <% } %>
       <form action="<%= basePath %>/logout" method="POST" class="inline-form">
-        <button type="submit" class="btn btn-ghost">Cerrar sesion</button>
+        <button type="submit" class="btn btn-ghost">Cerrar sesión</button>
       </form>
     </nav>
   <% } %>
