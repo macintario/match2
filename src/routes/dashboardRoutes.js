@@ -57,6 +57,25 @@ router.post(
 	handleXmlUpload,
 	dashboardController.uploadAnalistaMxg
 );
+router.post(
+	'/analista/generar-propuestas',
+	ensureAuth,
+	requireRole(['analista']),
+	dashboardController.generateAnalistaSubstitutionProposals
+);
+router.get(
+	'/analista/propuestas/export-csv',
+	ensureAuth,
+	requireRole(['analista']),
+	dashboardController.exportSubstitutionProposalsCsv
+);
+router.post(
+	'/analista/propuestas/:id/estado',
+	ensureAuth,
+	requireRole(['analista']),
+	express.urlencoded({ extended: false }),
+	dashboardController.updateProposalStatus
+);
 router.get('/escuela', ensureAuth, requireRole(['escuela']), dashboardController.escuelaDashboard);
 
 module.exports = router;

@@ -2,6 +2,7 @@ const { XMLValidator } = require('fast-xml-parser');
 const { Op, fn, col } = require('sequelize');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
 const { parseMxgWorkbook } = require('../services/mxgParser');
+const { generateSubstitutionProposals } = require('../services/substitutionProposalService');
 const {
   XmlUpload,
   TeacherImport,
@@ -9,6 +10,7 @@ const {
   HistoricalSubjectImport,
   RuaaScheduleImport,
   MxgScheduleImport,
+  SubstitutionProposal,
   User,
   sequelize,
 } = require('../models');
@@ -30,6 +32,14 @@ function decodeXmlBuffer(buffer) {
 
 function isAllowedXmlFilename(fileName) {
   return /\.(xml|xls)$/i.test(fileName || '');
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '');
+  if (text.includes('"') || text.includes(',') || text.includes('\n')) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }
 
 async function purgePreviousUploadByType(uploadType, transaction) {
@@ -93,6 +103,8 @@ async function analistaDashboard(req, res) {
   const historicoReport = req.session.analistaHistoricoReport || null;
   const ruaaReport = req.session.analistaRuaaReport || null;
   const mxgReport = req.session.analistaMxgReport || null;
+  const proposalGenerationReport = req.session.proposalGenerationReport || null;
+  delete req.session.proposalGenerationReport;
   const recentUploads = await XmlUpload.findAll({
     order: [['uploadedAt', 'DESC']],
     limit: 20,
@@ -195,6 +207,42 @@ async function analistaDashboard(req, res) {
     }
   }
 
+  const recentProposals = await SubstitutionProposal.findAll({
+    order: [['createdAt', 'DESC']],
+    limit: 200,
+  });
+
+  const proposalSummary = recentProposals.reduce(
+    (acc, item) => {
+      const assigned = Number(item.assignedHours || 0);
+      acc.totalPropuestas += 1;
+      acc.totalHorasAsignadas += assigned;
+      if (item.hasTurnoConflict) {
+        acc.conflictosTurno += 1;
+      }
+      if (item.hasHorarioConflict) {
+        acc.conflictosHorario += 1;
+      }
+      if (item.proposalStatus === 'ACEPTADA') {
+        acc.aceptadas += 1;
+      } else if (item.proposalStatus === 'RECHAZADA') {
+        acc.rechazadas += 1;
+      } else {
+        acc.pendientes += 1;
+      }
+      return acc;
+    },
+    {
+      totalPropuestas: 0,
+      totalHorasAsignadas: 0,
+      conflictosTurno: 0,
+      conflictosHorario: 0,
+      pendientes: 0,
+      aceptadas: 0,
+      rechazadas: 0,
+    }
+  );
+
   return res.render('dashboard-analista', {
     title: 'Panel Analista',
     report,
@@ -206,7 +254,184 @@ async function analistaDashboard(req, res) {
     escuelaHorasSolicitadas,
     recentUploads,
     hrsXCubHistogram,
+    recentProposals,
+    proposalSummary,
+    proposalGenerationReport,
   });
+}
+
+async function generateAnalistaSubstitutionProposals(req, res) {
+  try {
+    const [latestMxgUpload, latestPxpUpload, latestHistoricoUpload, latestRuaaUpload] = await Promise.all([
+      XmlUpload.findOne({ where: { uploadType: 'MXG' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
+      XmlUpload.findOne({ where: { uploadType: 'PXP' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
+      XmlUpload.findOne({ where: { uploadType: 'HISTORICO' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
+      XmlUpload.findOne({ where: { uploadType: 'RUAA' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
+    ]);
+
+    if (!latestMxgUpload || !latestPxpUpload || !latestHistoricoUpload || !latestRuaaUpload) {
+      setFlash(
+        req,
+        'error',
+        'Para generar propuestas necesitas cargar primero MXG, PxP, HISTORICO y RUAA.'
+      );
+      return res.redirect('/analista');
+    }
+
+    const [mxgRequests, teachers, historicalRows, ruaaRows] = await Promise.all([
+      MxgScheduleImport.findAll({
+        where: {
+          uploadId: latestMxgUpload.id,
+          needsAdditionalHours: true,
+          hrsNecesarias: { [Op.gt]: 0 },
+        },
+      }),
+      TeacherImport.findAll({
+        where: {
+          uploadId: latestPxpUpload.id,
+          hrsXCub: { [Op.regexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
+        },
+      }),
+      HistoricalSubjectImport.findAll({ where: { uploadId: latestHistoricoUpload.id } }),
+      RuaaScheduleImport.findAll({ where: { uploadId: latestRuaaUpload.id } }),
+    ]);
+
+    const eligibleTeachers = teachers.filter((t) => Number(String(t.hrsXCub).replace(',', '.')) > 0);
+
+    const proposals = generateSubstitutionProposals({
+      mxgRequests,
+      teachers: eligibleTeachers,
+      historicalRows,
+      ruaaRows,
+      uploadIds: {
+        mxgUploadId: latestMxgUpload.id,
+        pxpUploadId: latestPxpUpload.id,
+        historicoUploadId: latestHistoricoUpload.id,
+        ruaaUploadId: latestRuaaUpload.id,
+      },
+      generatedByUserId: req.session.user.id,
+    });
+
+    await sequelize.transaction(async (transaction) => {
+      await SubstitutionProposal.destroy({ where: {}, transaction });
+
+      if (!proposals.length) {
+        return;
+      }
+
+      const chunkSize = 1000;
+      for (let i = 0; i < proposals.length; i += chunkSize) {
+        await SubstitutionProposal.bulkCreate(proposals.slice(i, i + chunkSize), { transaction });
+      }
+    });
+
+    const totals = proposals.reduce(
+      (acc, item) => {
+        const assigned = Number(item.assignedHours || 0);
+        acc.totalPropuestas += 1;
+        acc.totalHorasAsignadas += assigned;
+        if (item.hasTurnoConflict) {
+          acc.conflictosTurno += 1;
+        }
+        if (item.hasHorarioConflict) {
+          acc.conflictosHorario += 1;
+        }
+        return acc;
+      },
+      {
+        totalPropuestas: 0,
+        totalHorasAsignadas: 0,
+        conflictosTurno: 0,
+        conflictosHorario: 0,
+      }
+    );
+
+    req.session.proposalGenerationReport = totals;
+    setFlash(
+      req,
+      'success',
+      `Propuestas generadas: ${totals.totalPropuestas} | Horas asignadas: ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno: ${totals.conflictosTurno} | Conflictos horario: ${totals.conflictosHorario}.`
+    );
+    return res.redirect('/analista');
+  } catch (error) {
+    setFlash(req, 'error', `No se pudieron generar propuestas: ${error.message}`);
+    return res.redirect('/analista');
+  }
+}
+
+async function updateProposalStatus(req, res) {
+  try {
+    const proposalId = Number(req.params.id);
+    const nextStatus = String(req.body.status || '').toUpperCase();
+    const allowed = ['PENDIENTE', 'ACEPTADA', 'RECHAZADA'];
+
+    if (!Number.isInteger(proposalId) || proposalId <= 0 || !allowed.includes(nextStatus)) {
+      setFlash(req, 'error', 'Solicitud invalida para cambiar el estado de propuesta.');
+      return res.redirect('/analista');
+    }
+
+    const [updated] = await SubstitutionProposal.update(
+      { proposalStatus: nextStatus },
+      { where: { id: proposalId } }
+    );
+
+    if (!updated) {
+      setFlash(req, 'error', 'No se encontro la propuesta a actualizar.');
+      return res.redirect('/analista');
+    }
+
+    setFlash(req, 'success', `Estado actualizado a ${nextStatus}.`);
+    return res.redirect('/analista');
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo actualizar el estado: ${error.message}`);
+    return res.redirect('/analista');
+  }
+}
+
+async function exportSubstitutionProposalsCsv(req, res) {
+  try {
+    const rows = await SubstitutionProposal.findAll({
+      order: [['id', 'ASC']],
+      limit: 20000,
+    });
+
+    const headers = [
+      'id',
+      'proposalStatus',
+      'teacherNombre',
+      'teacherNumEmp',
+      'teacherRfc',
+      'requestSubjectId',
+      'requestSubjectDesc',
+      'requestGroup',
+      'requestTurno',
+      'assignedHours',
+      'requestHours',
+      'requestRemainingHours',
+      'teacherRemainingBefore',
+      'teacherRemainingAfter',
+      'subjectMatchType',
+      'subjectSimilarity',
+      'hasTurnoConflict',
+      'hasHorarioConflict',
+      'conflictDetails',
+      'createdAt',
+    ];
+
+    const lines = [headers.join(',')];
+    for (const item of rows) {
+      const values = headers.map((key) => csvEscape(item.get(key)));
+      lines.push(values.join(','));
+    }
+
+    const fileName = `propuestas_sustitucion_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV: ${error.message}`);
+    return res.redirect('/analista');
+  }
 }
 
 function analistaUploadPage(req, res) {
@@ -632,5 +857,8 @@ module.exports = {
   uploadAnalistaHistoricoXml,
   uploadAnalistaRuaaXml,
   uploadAnalistaMxg,
+  generateAnalistaSubstitutionProposals,
+  updateProposalStatus,
+  exportSubstitutionProposalsCsv,
   escuelaDashboard,
 };

@@ -186,6 +186,15 @@ async function ensureSchemaCompatibility() {
         }
       }
     }
+
+    const proposalColumns = await queryInterface.describeTable('substitution_proposals').catch(() => null);
+    if (proposalColumns && !proposalColumns.proposalStatus) {
+      await queryInterface.addColumn('substitution_proposals', 'proposalStatus', {
+        type: DataTypes.ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA'),
+        allowNull: false,
+        defaultValue: 'PENDIENTE',
+      });
+    }
   } catch (error) {
     if (error.name !== 'SequelizeDatabaseError') {
       throw error;

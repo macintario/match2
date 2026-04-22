@@ -6,6 +6,7 @@ const PositionImport = require('./PositionImport');
 const HistoricalSubjectImport = require('./HistoricalSubjectImport');
 const RuaaScheduleImport = require('./RuaaScheduleImport');
 const MxgScheduleImport = require('./MxgScheduleImport');
+const SubstitutionProposal = require('./SubstitutionProposal');
 
 User.hasMany(XmlUpload, { foreignKey: 'userId' });
 XmlUpload.belongsTo(User, { foreignKey: 'userId' });
@@ -37,4 +38,5 @@ module.exports = {
   HistoricalSubjectImport,
   RuaaScheduleImport,
   MxgScheduleImport,
+  SubstitutionProposal,
 };
