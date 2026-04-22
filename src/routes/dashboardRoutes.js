@@ -22,7 +22,7 @@ function handleXmlUpload(req, res, next) {
 			type: 'error',
 			text: `No se pudo cargar el archivo. Verifica que pese menos de ${maxXmlUploadMb}MB.`,
 		};
-		return res.redirect('/analista');
+		return res.redirect('/analista/cargas');
 	});
 }
 

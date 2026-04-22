@@ -10,8 +10,11 @@
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
         <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
-        <form method="post" action="<%= basePath %>/analista/generar-propuestas" style="margin:0;">
-          <button type="submit" class="btn btn-primary">Generar propuestas de sustitucion</button>
+        <form method="post" action="<%= basePath %>/analista/generar-propuestas" style="margin:0;" class="js-generate-proposals-form">
+          <button type="submit" class="btn btn-primary js-generate-proposals-submit">
+            <span class="btn-label">Generar propuestas de sustitucion</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
         </form>
       </div>
     </div>
@@ -114,5 +117,25 @@
     </div>
   </section>
 </main>
+
+<script>
+  (function () {
+    const form = document.querySelector('.js-generate-proposals-form');
+    if (!form) {
+      return;
+    }
+
+    form.addEventListener('submit', function () {
+      const submitButton = form.querySelector('.js-generate-proposals-submit');
+      if (!submitButton) {
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.classList.add('is-loading');
+      submitButton.setAttribute('aria-busy', 'true');
+    });
+  })();
+</script>
 
 <%- include('partials/foot') %>

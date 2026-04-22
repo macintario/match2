@@ -176,6 +176,7 @@ select:focus {
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
+  position: relative;
   transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
@@ -186,6 +187,33 @@ select:focus {
 
 .btn-primary:hover {
   background: var(--primary-strong);
+}
+
+.btn:disabled {
+  cursor: wait;
+  opacity: 0.92;
+}
+
+.btn-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.btn.is-loading .btn-spinner {
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-primary:focus-visible,

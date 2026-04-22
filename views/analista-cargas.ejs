@@ -9,47 +9,78 @@
     </div>
     <p>Sube los archivos fuente para actualizar la información del analista.</p>
 
-    <form action="<%= basePath %>/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-xml" method="POST" enctype="multipart/form-data" class="form-grid js-upload-form">
       <label>
         Cargar Plantilla (PxP) de docentes y plazas
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
       </label>
       <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar Plantilla (PxP)</button>
+        <button type="submit" class="btn btn-primary js-upload-submit">
+          <span class="btn-label">Procesar Plantilla (PxP)</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
       </div>
     </form>
 
-    <form action="<%= basePath %>/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-historico-xml" method="POST" enctype="multipart/form-data" class="form-grid js-upload-form">
       <label>
         Cargar HISTORICO de asignaturas previas
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
       </label>
       <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar HISTORICO</button>
+        <button type="submit" class="btn btn-primary js-upload-submit">
+          <span class="btn-label">Procesar HISTORICO</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
       </div>
     </form>
 
-    <form action="<%= basePath %>/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-ruaa-xml" method="POST" enctype="multipart/form-data" class="form-grid js-upload-form">
       <label>
         Cargar RUAA de horarios docentes
         <input type="file" name="xmlFile" accept=".xml,.xls,text/xml,application/xml,application/vnd.ms-excel" required />
       </label>
       <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar RUAA</button>
+        <button type="submit" class="btn btn-primary js-upload-submit">
+          <span class="btn-label">Procesar RUAA</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
       </div>
     </form>
 
-    <form action="<%= basePath %>/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid">
+    <form action="<%= basePath %>/analista/upload-mxg" method="POST" enctype="multipart/form-data" class="form-grid js-upload-form">
       <label>
         Cargar MXG de horarios y horas solicitadas
         <strong>La columna con horas solicitadas debe llamarse "HRSNECESARIAS".</strong>
         <input type="file" name="xmlFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
       </label>
       <div class="row-actions">
-        <button type="submit" class="btn btn-primary">Procesar MXG</button>
+        <button type="submit" class="btn btn-primary js-upload-submit">
+          <span class="btn-label">Procesar MXG</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
       </div>
     </form>
   </section>
 </main>
+
+<script>
+  (function () {
+    const forms = document.querySelectorAll('.js-upload-form');
+    forms.forEach(function (form) {
+      form.addEventListener('submit', function () {
+        const submitButton = form.querySelector('.js-upload-submit');
+        if (!submitButton) {
+          return;
+        }
+
+        // Evita dobles envios y muestra estado de trabajo en curso.
+        submitButton.disabled = true;
+        submitButton.classList.add('is-loading');
+        submitButton.setAttribute('aria-busy', 'true');
+      });
+    });
+  })();
+</script>
 
 <%- include('partials/foot') %>

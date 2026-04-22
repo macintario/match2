@@ -451,19 +451,19 @@ async function uploadAnalistaXml(req, res) {
   try {
     if (!req.file) {
       setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
       setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const xmlContent = decodeXmlBuffer(req.file.buffer);
     const validXml = XMLValidator.validate(xmlContent);
     if (validXml !== true) {
       setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const report = parsePayrollXml(xmlContent);
@@ -551,10 +551,10 @@ async function uploadAnalistaXml(req, res) {
       'success',
       `Archivo procesado: ${report.summary.totalDocentes} docentes y ${report.summary.totalPlazas} plazas.`
     );
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   } catch (error) {
     setFlash(req, 'error', `No se pudo procesar el XML: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   }
 }
 
@@ -562,19 +562,19 @@ async function uploadAnalistaHistoricoXml(req, res) {
   try {
     if (!req.file) {
       setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
       setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const xmlContent = decodeXmlBuffer(req.file.buffer);
     const validXml = XMLValidator.validate(xmlContent);
     if (validXml !== true) {
       setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const historico = parseHistoricoXml(xmlContent);
@@ -633,10 +633,10 @@ async function uploadAnalistaHistoricoXml(req, res) {
       'success',
       `HISTORICO procesado: ${historico.summary.totalDocentes} docentes y ${historico.summary.totalAsignaturas} asignaturas.`
     );
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   } catch (error) {
     setFlash(req, 'error', `No se pudo procesar HISTORICO.xml: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   }
 }
 
@@ -644,19 +644,19 @@ async function uploadAnalistaRuaaXml(req, res) {
   try {
     if (!req.file) {
       setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
       setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const xmlContent = decodeXmlBuffer(req.file.buffer);
     const validXml = XMLValidator.validate(xmlContent);
     if (validXml !== true) {
       setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const ruaa = parseRuaaXml(xmlContent);
@@ -756,10 +756,10 @@ async function uploadAnalistaRuaaXml(req, res) {
       'success',
       `RUAA procesado: ${ruaa.summary.totalHorarios} horarios de clase y ${ruaa.summary.totalActividades} actividades.`
     );
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   } catch (error) {
     setFlash(req, 'error', `No se pudo procesar RUAA.xml: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   }
 }
 
@@ -767,12 +767,12 @@ async function uploadAnalistaMxg(req, res) {
   try {
     if (!req.file) {
       setFlash(req, 'error', 'Debes seleccionar un archivo MXG.xlsx.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     if (!/\.xlsx$/i.test(req.file.originalname || '')) {
       setFlash(req, 'error', 'Solo se permiten archivos con extension .xlsx para MXG.');
-      return res.redirect('/analista');
+      return res.redirect('/analista/cargas');
     }
 
     const mxg = parseMxgWorkbook(req.file.buffer);
@@ -843,10 +843,10 @@ async function uploadAnalistaMxg(req, res) {
       'success',
       `MXG procesado: ${mxg.summary.totalRegistros} horarios y ${mxg.summary.totalSolicitudesAdicionales} solicitudes de horas adicionales.`
     );
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   } catch (error) {
     setFlash(req, 'error', `No se pudo procesar MXG.xlsx: ${error.message}`);
-    return res.redirect('/analista');
+    return res.redirect('/analista/cargas');
   }
 }
 
