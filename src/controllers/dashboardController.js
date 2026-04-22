@@ -42,6 +42,123 @@ function csvEscape(value) {
   return text;
 }
 
+const HEATMAP_START_MINUTES = 7 * 60;
+const HEATMAP_END_MINUTES = 22 * 60;
+const HEATMAP_SLOT_MINUTES = 30;
+
+function minutesFromTimeToken(token) {
+  const value = String(token || '').trim();
+  if (!value) {
+    return null;
+  }
+
+  if (/^\d{1,2}:\d{2}$/.test(value)) {
+    const [h, m] = value.split(':').map(Number);
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      return h * 60 + m;
+    }
+    return null;
+  }
+
+  if (/^\d{1,2}$/.test(value)) {
+    const h = Number(value);
+    if (h >= 0 && h < 24) {
+      return h * 60;
+    }
+    return null;
+  }
+
+  if (/^\d{3,4}$/.test(value)) {
+    const h = Number(value.length === 3 ? value.slice(0, 1) : value.slice(0, 2));
+    const m = Number(value.length === 3 ? value.slice(1) : value.slice(2));
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      return h * 60 + m;
+    }
+  }
+
+  return null;
+}
+
+function parseMxgDayRanges(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return [];
+  }
+
+  const ranges = [];
+  const regex = /(\d{1,2}:\d{2}|\d{1,2}|\d{3,4})\s*(?:-|a|al|hasta|–|—)\s*(\d{1,2}:\d{2}|\d{1,2}|\d{3,4})/gi;
+  let match = regex.exec(text);
+  while (match) {
+    const start = minutesFromTimeToken(match[1]);
+    const end = minutesFromTimeToken(match[2]);
+    if (start !== null && end !== null && end > start) {
+      ranges.push({ start, end });
+    }
+    match = regex.exec(text);
+  }
+
+  return ranges;
+}
+
+function buildMxgHeatmap(rows) {
+  const days = [
+    { key: 'lunes', label: 'Lunes' },
+    { key: 'martes', label: 'Martes' },
+    { key: 'miercoles', label: 'Miercoles' },
+    { key: 'jueves', label: 'Jueves' },
+    { key: 'viernes', label: 'Viernes' },
+    { key: 'sabado', label: 'Sabado' },
+  ];
+
+  const slotCount = (HEATMAP_END_MINUTES - HEATMAP_START_MINUTES) / HEATMAP_SLOT_MINUTES;
+  const slotLabels = Array.from({ length: slotCount }, (_, idx) => {
+    const minutes = HEATMAP_START_MINUTES + idx * HEATMAP_SLOT_MINUTES;
+    const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const m = String(minutes % 60).padStart(2, '0');
+    return `${h}:${m}`;
+  });
+
+  const slotSetsByDay = days.map(() => Array.from({ length: slotCount }, () => new Set()));
+
+  for (const row of rows) {
+    const groupKey = [
+      row.plantelId || 'N/A',
+      row.carreraId || 'N/A',
+      row.grupo || `ROW-${row.id}`,
+    ].join('|');
+
+    days.forEach((day, dayIndex) => {
+      const ranges = parseMxgDayRanges(row[day.key]);
+      for (const range of ranges) {
+        for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
+          const slotStart = HEATMAP_START_MINUTES + slotIndex * HEATMAP_SLOT_MINUTES;
+          const slotEnd = slotStart + HEATMAP_SLOT_MINUTES;
+          const overlaps = range.start < slotEnd && slotStart < range.end;
+          if (overlaps) {
+            slotSetsByDay[dayIndex][slotIndex].add(groupKey);
+          }
+        }
+      }
+    });
+  }
+
+  const matrix = Array.from({ length: slotCount }, (_, slotIndex) =>
+    days.map((_, dayIndex) => slotSetsByDay[dayIndex][slotIndex].size)
+  );
+
+  const maxCount = matrix.reduce(
+    (acc, row) => Math.max(acc, ...row),
+    0
+  );
+
+  return {
+    days,
+    slotLabels,
+    matrix,
+    maxCount,
+  };
+}
+
 async function purgePreviousUploadByType(uploadType, transaction) {
   const previousUploads = await XmlUpload.findAll({
     where: { uploadType },
@@ -216,6 +333,43 @@ async function analistaDashboard(req, res) {
     escuelaHorasSolicitadas,
     recentUploads,
     hrsXCubHistogram,
+  });
+}
+
+async function analistaAnalyticsPage(req, res) {
+  const latestMxgUpload = await XmlUpload.findOne({
+    where: { uploadType: 'MXG' },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id'],
+  });
+
+  let escuelaHorasSolicitadas = null;
+  let mxgHeatmap = null;
+
+  if (latestMxgUpload) {
+    const anyMxgRow = await MxgScheduleImport.findOne({
+      where: { uploadId: latestMxgUpload.id },
+      attributes: ['plantelDesc', 'plantelId'],
+    });
+
+    if (anyMxgRow) {
+      const plantelId = anyMxgRow.get('plantelId');
+      const plantelDesc = anyMxgRow.get('plantelDesc');
+      escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
+    }
+
+    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
+      where: { uploadId: latestMxgUpload.id },
+      attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+    });
+
+    mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
+  }
+
+  return res.render('analista-analitica', {
+    title: 'Analitica MXG',
+    mxgHeatmap,
+    escuelaHorasSolicitadas,
   });
 }
 
@@ -859,6 +1013,7 @@ function escuelaDashboard(req, res) {
 module.exports = {
   redirectByRole,
   analistaDashboard,
+  analistaAnalyticsPage,
   analistaProposalsPage,
   analistaUploadPage,
   uploadAnalistaXml,

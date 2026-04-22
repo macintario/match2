@@ -1,0 +1,54 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <div class="row-between">
+      <div>
+        <h1>Analitica MXG</h1>
+        <p>Mapa de calor de grupos activos por dia y franja horaria.</p>
+      </div>
+      <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
+    </div>
+
+    <% if (escuelaHorasSolicitadas) { %>
+      <p><strong>Escuela:</strong> <%= escuelaHorasSolicitadas %></p>
+    <% } %>
+
+    <% if (mxgHeatmap && mxgHeatmap.slotLabels && mxgHeatmap.slotLabels.length > 0) { %>
+      <h3>Mapa de calor de grupos activos (MXG)</h3>
+      <p>Intervalos de 30 minutos desde 07:00 hasta 22:00 hrs.</p>
+      <div class="table-wrap">
+        <table class="heatmap-table">
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <% mxgHeatmap.days.forEach((day) => { %>
+                <th><%= day.label %></th>
+              <% }) %>
+            </tr>
+          </thead>
+          <tbody>
+            <% mxgHeatmap.slotLabels.forEach((slot, slotIndex) => { %>
+              <tr>
+                <td class="heatmap-hour"><%= slot %></td>
+                <% mxgHeatmap.days.forEach((day, dayIndex) => {
+                  const count = mxgHeatmap.matrix[slotIndex][dayIndex];
+                  const intensity = mxgHeatmap.maxCount ? (count / mxgHeatmap.maxCount) : 0;
+                  const alpha = (0.08 + intensity * 0.72).toFixed(2);
+                  const textColor = intensity >= 0.55 ? '#fff' : '#2b1d22';
+                %>
+                  <td style="background-color: rgba(107, 23, 53, <%= alpha %>); color: <%= textColor %>; text-align: center; font-weight: 600;"><%= count %></td>
+                <% }) %>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p>No hay datos MXG disponibles para construir el mapa de calor.</p>
+    <% } %>
+  </section>
+</main>
+
+<%- include('partials/foot') %>

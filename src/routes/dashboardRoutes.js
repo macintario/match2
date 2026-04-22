@@ -28,6 +28,7 @@ function handleXmlUpload(req, res, next) {
 
 router.get('/dashboard', ensureAuth, dashboardController.redirectByRole);
 router.get('/analista', ensureAuth, requireRole(['analista']), dashboardController.analistaDashboard);
+router.get('/analista/analitica', ensureAuth, requireRole(['analista']), dashboardController.analistaAnalyticsPage);
 router.get('/analista/propuestas', ensureAuth, requireRole(['analista']), dashboardController.analistaProposalsPage);
 router.get('/analista/cargas', ensureAuth, requireRole(['analista']), dashboardController.analistaUploadPage);
 router.post(

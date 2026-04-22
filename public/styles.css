@@ -285,6 +285,20 @@ td {
   white-space: nowrap;
 }
 
+.heatmap-table th,
+.heatmap-table td {
+  min-width: 82px;
+}
+
+.heatmap-hour {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  background: #fff;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr));
