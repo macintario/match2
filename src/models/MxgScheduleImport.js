@@ -61,6 +61,14 @@ const MxgScheduleImport = sequelize.define(
       type: DataTypes.STRING(255),
       allowNull: true,
     },
+    semNivel: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+    asigTipo: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
     numEmp: {
       type: DataTypes.STRING(30),
       allowNull: true,

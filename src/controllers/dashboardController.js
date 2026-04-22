@@ -345,7 +345,24 @@ async function analistaAnalyticsPage(req, res) {
   let mxgHeatmap = null;
   let hrsXCubHistogram = [];
 
+  // Valores seleccionados en los filtros (pueden venir vacíos)
+  const filterSemNivel = req.query.semNivel || '';
+  const filterAcademia = req.query.academia || '';
+  const filterAsigTipo = req.query.asigTipo || '';
+
+  // Listas de valores únicos para los <select>
+  let semNivelOptions = [];
+  let academiaOptions = [];
+  let asigTipoOptions = [];
+  let hasSemNivelField = false;
+  let hasAsigTipoField = false;
+
   if (latestMxgUpload) {
+    const queryInterface = sequelize.getQueryInterface();
+    const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
+    hasSemNivelField = Boolean(mxgTableColumns.semNivel);
+    hasAsigTipoField = Boolean(mxgTableColumns.asigTipo);
+
     const anyMxgRow = await MxgScheduleImport.findOne({
       where: { uploadId: latestMxgUpload.id },
       attributes: ['plantelDesc', 'plantelId'],
@@ -357,8 +374,45 @@ async function analistaAnalyticsPage(req, res) {
       escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
     }
 
-    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
+    // Obtener valores únicos para los selectores de filtro solo con columnas disponibles.
+    const filterAttributes = ['academiaDesc'];
+    if (hasSemNivelField) {
+      filterAttributes.push('semNivel');
+    }
+    if (hasAsigTipoField) {
+      filterAttributes.push('asigTipo');
+    }
+
+    const mxgRowsForFilters = await MxgScheduleImport.findAll({
       where: { uploadId: latestMxgUpload.id },
+      attributes: filterAttributes,
+      raw: true,
+    });
+
+    semNivelOptions = hasSemNivelField
+      ? Array.from(
+        new Set(mxgRowsForFilters.map((r) => String(r.semNivel || '').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+      : [];
+
+    academiaOptions = Array.from(
+      new Set(mxgRowsForFilters.map((r) => String(r.academiaDesc || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+    asigTipoOptions = hasAsigTipoField
+      ? Array.from(
+        new Set(mxgRowsForFilters.map((r) => String(r.asigTipo || '').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+      : [];
+
+    // Construir cláusula WHERE con los filtros activos
+    const heatmapWhere = { uploadId: latestMxgUpload.id };
+    if (filterSemNivel && hasSemNivelField) heatmapWhere.semNivel = filterSemNivel;
+    if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
+    if (filterAsigTipo && hasAsigTipoField) heatmapWhere.asigTipo = filterAsigTipo;
+
+    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
+      where: heatmapWhere,
       attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
     });
 
@@ -410,6 +464,14 @@ async function analistaAnalyticsPage(req, res) {
     mxgHeatmap,
     escuelaHorasSolicitadas,
     hrsXCubHistogram,
+    semNivelOptions,
+    academiaOptions,
+    asigTipoOptions,
+    filterSemNivel,
+    filterAcademia,
+    filterAsigTipo,
+    hasSemNivelField,
+    hasAsigTipoField,
   });
 }
 
@@ -1006,6 +1068,8 @@ async function uploadAnalistaMxg(req, res) {
           asignaturaId: item.asignaturaId || null,
           asignaturaDesc: item.asignaturaDesc || null,
           academiaDesc: item.academiaDesc || null,
+          semNivel: item.semNivel || null,
+          asigTipo: item.asigTipo || null,
           numEmp: item.numEmp || null,
           rfc: item.rfc || null,
           nombre: item.nombre || null,

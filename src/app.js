@@ -187,6 +187,24 @@ async function ensureSchemaCompatibility() {
       }
     }
 
+    // mxg_schedule_imports new columns
+    const mxgColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => null);
+    if (mxgColumns) {
+      const mxgNewCols = {
+        semNivel: DataTypes.STRING(40),
+        asigTipo: DataTypes.STRING(80),
+      };
+      for (const [colName, colType] of Object.entries(mxgNewCols)) {
+        if (!mxgColumns[colName]) {
+          await queryInterface.addColumn('mxg_schedule_imports', colName, {
+            type: colType,
+            allowNull: true,
+            defaultValue: null,
+          });
+        }
+      }
+    }
+
     const proposalColumns = await queryInterface.describeTable('substitution_proposals').catch(() => null);
     if (proposalColumns && !proposalColumns.proposalStatus) {
       await queryInterface.addColumn('substitution_proposals', 'proposalStatus', {

@@ -107,7 +107,68 @@
       <h3>Mapa de calor de grupos activos (MXG)</h3>
       <p>Intervalos de 30 minutos desde 07:00 hasta 22:00 hrs.</p>
       <p><strong>Leyenda:</strong> Rojo = menor uso de espacios, Verde = mayor uso de espacios.</p>
+
+      <%# Formulario de filtros %>
+      <form method="GET" action="<%= basePath %>/analista/analitica" style="margin-bottom:1rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
+        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+          <label for="filter-semnivel" style="font-size:0.8rem; font-weight:600; color:#555;">Sem/Nivel</label>
+          <select id="filter-semnivel" name="semNivel" class="form-control" style="min-width:120px;" <%= hasSemNivelField ? '' : 'disabled' %>>
+            <option value=""><%= hasSemNivelField ? '— Todos —' : 'No disponible' %></option>
+            <% if (hasSemNivelField) { %>
+              <% semNivelOptions.forEach(function(opt) { %>
+                <option value="<%= opt %>" <%= filterSemNivel === opt ? 'selected' : '' %>><%= opt %></option>
+              <% }) %>
+            <% } %>
+          </select>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+          <label for="filter-academia" style="font-size:0.8rem; font-weight:600; color:#555;">Academia</label>
+          <select id="filter-academia" name="academia" class="form-control" style="min-width:180px;">
+            <option value="">— Todas —</option>
+            <% academiaOptions.forEach(function(opt) { %>
+              <option value="<%= opt %>" <%= filterAcademia === opt ? 'selected' : '' %>><%= opt %></option>
+            <% }) %>
+          </select>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+          <label for="filter-asigtipo" style="font-size:0.8rem; font-weight:600; color:#555;">Tipo de asignatura</label>
+          <select id="filter-asigtipo" name="asigTipo" class="form-control" style="min-width:150px;" <%= hasAsigTipoField ? '' : 'disabled' %>>
+            <option value=""><%= hasAsigTipoField ? '— Todos —' : 'No disponible' %></option>
+            <% if (hasAsigTipoField) { %>
+              <% asigTipoOptions.forEach(function(opt) { %>
+                <option value="<%= opt %>" <%= filterAsigTipo === opt ? 'selected' : '' %>><%= opt %></option>
+              <% }) %>
+            <% } %>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Filtrar</button>
+        <% if (filterSemNivel || filterAcademia || filterAsigTipo) { %>
+          <a href="<%= basePath %>/analista/analitica" class="btn btn-secondary">Limpiar filtros</a>
+        <% } %>
+      </form>
+
+      <% if (!hasSemNivelField || !hasAsigTipoField) { %>
+        <p style="font-size:0.85rem; color:#8a6d3b; margin-top:-0.35rem; margin-bottom:0.9rem;">
+          Algunos filtros estan deshabilitados porque tu base de datos MXG aun no tiene esas columnas. Reimporta MXG o reinicia la app para actualizar esquema.
+        </p>
+      <% } %>
+
+      <% if (filterSemNivel || filterAcademia || filterAsigTipo) { %>
+        <p style="font-size:0.85rem; color:#6b1735; font-weight:600;">
+          Filtros activos:
+          <% if (filterSemNivel && hasSemNivelField) { %><span style="margin-right:0.5rem;">Sem/Nivel: <em><%= filterSemNivel %></em></span><% } %>
+          <% if (filterAcademia) { %><span style="margin-right:0.5rem;">Academia: <em><%= filterAcademia %></em></span><% } %>
+          <% if (filterAsigTipo && hasAsigTipoField) { %><span>Tipo asig.: <em><%= filterAsigTipo %></em></span><% } %>
+        </p>
+      <% } %>
+
       <div class="table-wrap">
+        <% if (mxgHeatmap.maxCount === 0) { %>
+          <p style="color:#888; font-style:italic;">No hay grupos activos con los filtros seleccionados.</p>
+        <% } %>
         <table class="heatmap-table">
           <thead>
             <tr>

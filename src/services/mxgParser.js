@@ -35,6 +35,9 @@ function parseMxgWorkbook(buffer) {
     throw new Error('El archivo MXG no contiene datos.');
   }
 
+  // Log de columnas para depuración — remover después de confirmar
+  console.log('[mxgParser] Columnas detectadas en Excel:', Object.keys(rows[0]).join(', '));
+
   const normalizedRows = rows.map((row) => {
     const hrsNecesarias = asNumber(row.HRSNECESARIAS);
     return {
@@ -50,6 +53,8 @@ function parseMxgWorkbook(buffer) {
       asignaturaId: asString(row.ASIGNATURA),
       asignaturaDesc: asString(row.ASIGNATURADESC),
       academiaDesc: asString(row.ACADEMIADESC),
+      semNivel: asString(row.SEM_NIVEL !== undefined ? row.SEM_NIVEL : row.SEMNIVEL),
+      asigTipo: asString(row.ASIG_TIPO !== undefined ? row.ASIG_TIPO : row.ASIGTIPO),
       numEmp: asString(row.NUMEMP),
       rfc: asString(row.RFC2),
       nombre: asString(row.NOMBRE2),
