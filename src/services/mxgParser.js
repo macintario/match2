@@ -35,9 +35,6 @@ function parseMxgWorkbook(buffer) {
     throw new Error('El archivo MXG no contiene datos.');
   }
 
-  // Log de columnas para depuración — remover después de confirmar
-  console.log('[mxgParser] Columnas detectadas en Excel:', Object.keys(rows[0]).join(', '));
-
   const normalizedRows = rows.map((row) => {
     const hrsNecesarias = asNumber(row.HRSNECESARIAS);
     return {
