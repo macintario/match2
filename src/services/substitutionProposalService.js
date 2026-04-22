@@ -94,15 +94,38 @@ function similarityByTokens(a, b) {
   return union ? inter / union : 0;
 }
 
+function normalizeTurno(value) {
+  const t = normalizeText(value);
+  if (!t) {
+    return '';
+  }
+
+  if (t === 'm' || t.includes('matutino')) {
+    return 'M';
+  }
+
+  if (t === 'v' || t.includes('vespertino')) {
+    return 'V';
+  }
+
+  if (t === 'x' || t.includes('mixto')) {
+    return 'X';
+  }
+
+  return '';
+}
+
 function isTurnoConflict(requestTurno, teacherTurno) {
-  const req = normalizeText(requestTurno);
-  const tea = normalizeText(teacherTurno);
+  const req = normalizeTurno(requestTurno);
+  const tea = normalizeTurno(teacherTurno);
   if (!req || !tea) {
     return false;
   }
-  if (tea === 'x' || req === 'x') {
+
+  if (tea === 'X' || req === 'X') {
     return false;
   }
+
   return req !== tea;
 }
 
