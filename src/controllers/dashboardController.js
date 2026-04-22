@@ -1,6 +1,11 @@
 const { XMLValidator } = require('fast-xml-parser');
 const { Op, fn, col } = require('sequelize');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
+const {
+  parsePayrollWorkbook,
+  parseHistoricoWorkbook,
+  parseRuaaWorkbook,
+} = require('../services/payrollWorkbookParser');
 const { parseMxgWorkbook } = require('../services/mxgParser');
 const { generateSubstitutionProposals } = require('../services/substitutionProposalService');
 const {
@@ -31,7 +36,15 @@ function decodeXmlBuffer(buffer) {
 }
 
 function isAllowedXmlFilename(fileName) {
-  return /\.(xml|xls)$/i.test(fileName || '');
+  return /\.(xml|xls|xlsx)$/i.test(fileName || '');
+}
+
+function isXmlFilename(fileName) {
+  return /\.xml$/i.test(fileName || '');
+}
+
+function isExcelFilename(fileName) {
+  return /\.(xls|xlsx)$/i.test(fileName || '');
 }
 
 function csvEscape(value) {
@@ -349,11 +362,15 @@ async function analistaAnalyticsPage(req, res) {
   const filterSemNivel = req.query.semNivel || '';
   const filterAcademia = req.query.academia || '';
   const filterAsigTipo = req.query.asigTipo || '';
+  const filterModalidad = req.query.modalidad || '';
+  const filterCarreraDesc = req.query.carreraDesc || '';
 
   // Listas de valores únicos para los <select>
   let semNivelOptions = [];
   let academiaOptions = [];
   let asigTipoOptions = [];
+  let modalidadOptions = [];
+  let carreraDescOptions = [];
   let hasSemNivelField = false;
   let hasAsigTipoField = false;
 
@@ -375,7 +392,7 @@ async function analistaAnalyticsPage(req, res) {
     }
 
     // Obtener valores únicos para los selectores de filtro solo con columnas disponibles.
-    const filterAttributes = ['academiaDesc'];
+    const filterAttributes = ['academiaDesc', 'modalidad', 'carreraDesc'];
     if (hasSemNivelField) {
       filterAttributes.push('semNivel');
     }
@@ -405,11 +422,21 @@ async function analistaAnalyticsPage(req, res) {
       ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
       : [];
 
+    modalidadOptions = Array.from(
+      new Set(mxgRowsForFilters.map((r) => String(r.modalidad || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+    carreraDescOptions = Array.from(
+      new Set(mxgRowsForFilters.map((r) => String(r.carreraDesc || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
     // Construir cláusula WHERE con los filtros activos
     const heatmapWhere = { uploadId: latestMxgUpload.id };
     if (filterSemNivel && hasSemNivelField) heatmapWhere.semNivel = filterSemNivel;
     if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
     if (filterAsigTipo && hasAsigTipoField) heatmapWhere.asigTipo = filterAsigTipo;
+    if (filterModalidad) heatmapWhere.modalidad = filterModalidad;
+    if (filterCarreraDesc) heatmapWhere.carreraDesc = filterCarreraDesc;
 
     const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
       where: heatmapWhere,
@@ -467,9 +494,13 @@ async function analistaAnalyticsPage(req, res) {
     semNivelOptions,
     academiaOptions,
     asigTipoOptions,
+    modalidadOptions,
+    carreraDescOptions,
     filterSemNivel,
     filterAcademia,
     filterAsigTipo,
+    filterModalidad,
+    filterCarreraDesc,
     hasSemNivelField,
     hasAsigTipoField,
   });
@@ -706,23 +737,25 @@ function analistaUploadPage(req, res) {
 async function uploadAnalistaXml(req, res) {
   try {
     if (!req.file) {
-      setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
+      setFlash(req, 'error', 'Debes seleccionar un archivo XML o Excel.');
       return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml, .xls o .xlsx para este tipo de carga.');
       return res.redirect('/analista/cargas');
     }
 
-    const xmlContent = decodeXmlBuffer(req.file.buffer);
-    const validXml = XMLValidator.validate(xmlContent);
-    if (validXml !== true) {
-      setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista/cargas');
-    }
-
-    const report = parsePayrollXml(xmlContent);
+    const report = isExcelFilename(req.file.originalname)
+      ? parsePayrollWorkbook(req.file.buffer)
+      : (() => {
+        const xmlContent = decodeXmlBuffer(req.file.buffer);
+        const validXml = XMLValidator.validate(xmlContent);
+        if (validXml !== true) {
+          throw new Error('El archivo no es un XML valido.');
+        }
+        return parsePayrollXml(xmlContent);
+      })();
 
     await sequelize.transaction(async (transaction) => {
       await purgePreviousUploadByType('PXP', transaction);
@@ -809,7 +842,7 @@ async function uploadAnalistaXml(req, res) {
     );
     return res.redirect('/analista/cargas');
   } catch (error) {
-    setFlash(req, 'error', `No se pudo procesar el XML: ${error.message}`);
+    setFlash(req, 'error', `No se pudo procesar el archivo PxP: ${error.message}`);
     return res.redirect('/analista/cargas');
   }
 }
@@ -817,23 +850,25 @@ async function uploadAnalistaXml(req, res) {
 async function uploadAnalistaHistoricoXml(req, res) {
   try {
     if (!req.file) {
-      setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
+      setFlash(req, 'error', 'Debes seleccionar un archivo XML o Excel.');
       return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml, .xls o .xlsx para este tipo de carga.');
       return res.redirect('/analista/cargas');
     }
 
-    const xmlContent = decodeXmlBuffer(req.file.buffer);
-    const validXml = XMLValidator.validate(xmlContent);
-    if (validXml !== true) {
-      setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista/cargas');
-    }
-
-    const historico = parseHistoricoXml(xmlContent);
+    const historico = isExcelFilename(req.file.originalname)
+      ? parseHistoricoWorkbook(req.file.buffer)
+      : (() => {
+        const xmlContent = decodeXmlBuffer(req.file.buffer);
+        const validXml = XMLValidator.validate(xmlContent);
+        if (validXml !== true) {
+          throw new Error('El archivo no es un XML valido.');
+        }
+        return parseHistoricoXml(xmlContent);
+      })();
 
     await sequelize.transaction(async (transaction) => {
       await purgePreviousUploadByType('HISTORICO', transaction);
@@ -891,7 +926,7 @@ async function uploadAnalistaHistoricoXml(req, res) {
     );
     return res.redirect('/analista/cargas');
   } catch (error) {
-    setFlash(req, 'error', `No se pudo procesar HISTORICO.xml: ${error.message}`);
+    setFlash(req, 'error', `No se pudo procesar HISTORICO: ${error.message}`);
     return res.redirect('/analista/cargas');
   }
 }
@@ -899,23 +934,25 @@ async function uploadAnalistaHistoricoXml(req, res) {
 async function uploadAnalistaRuaaXml(req, res) {
   try {
     if (!req.file) {
-      setFlash(req, 'error', 'Debes seleccionar un archivo XML.');
+      setFlash(req, 'error', 'Debes seleccionar un archivo XML o Excel.');
       return res.redirect('/analista/cargas');
     }
 
     if (!isAllowedXmlFilename(req.file.originalname)) {
-      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml o .xls para este tipo de carga.');
+      setFlash(req, 'error', 'Solo se permiten archivos con extension .xml, .xls o .xlsx para este tipo de carga.');
       return res.redirect('/analista/cargas');
     }
 
-    const xmlContent = decodeXmlBuffer(req.file.buffer);
-    const validXml = XMLValidator.validate(xmlContent);
-    if (validXml !== true) {
-      setFlash(req, 'error', 'El archivo no es un XML valido.');
-      return res.redirect('/analista/cargas');
-    }
-
-    const ruaa = parseRuaaXml(xmlContent);
+    const ruaa = isExcelFilename(req.file.originalname)
+      ? parseRuaaWorkbook(req.file.buffer)
+      : (() => {
+        const xmlContent = decodeXmlBuffer(req.file.buffer);
+        const validXml = XMLValidator.validate(xmlContent);
+        if (validXml !== true) {
+          throw new Error('El archivo no es un XML valido.');
+        }
+        return parseRuaaXml(xmlContent);
+      })();
 
     await sequelize.transaction(async (transaction) => {
       await purgePreviousUploadByType('RUAA', transaction);
@@ -1014,7 +1051,7 @@ async function uploadAnalistaRuaaXml(req, res) {
     );
     return res.redirect('/analista/cargas');
   } catch (error) {
-    setFlash(req, 'error', `No se pudo procesar RUAA.xml: ${error.message}`);
+    setFlash(req, 'error', `No se pudo procesar RUAA: ${error.message}`);
     return res.redirect('/analista/cargas');
   }
 }

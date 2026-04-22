@@ -144,8 +144,28 @@
           </select>
         </div>
 
+        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+          <label for="filter-modalidad" style="font-size:0.8rem; font-weight:600; color:#555;">Modalidad</label>
+          <select id="filter-modalidad" name="modalidad" class="form-control" style="min-width:120px;">
+            <option value="">— Todas —</option>
+            <% modalidadOptions.forEach(function(opt) { %>
+              <option value="<%= opt %>" <%= filterModalidad === opt ? 'selected' : '' %>><%= opt %></option>
+            <% }) %>
+          </select>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+          <label for="filter-carreradesc" style="font-size:0.8rem; font-weight:600; color:#555;">Carrera</label>
+          <select id="filter-carreradesc" name="carreraDesc" class="form-control" style="min-width:200px;">
+            <option value="">— Todas —</option>
+            <% carreraDescOptions.forEach(function(opt) { %>
+              <option value="<%= opt %>" <%= filterCarreraDesc === opt ? 'selected' : '' %>><%= opt %></option>
+            <% }) %>
+          </select>
+        </div>
+
         <button type="submit" class="btn btn-primary">Filtrar</button>
-        <% if (filterSemNivel || filterAcademia || filterAsigTipo) { %>
+        <% if (filterSemNivel || filterAcademia || filterAsigTipo || filterModalidad || filterCarreraDesc) { %>
           <a href="<%= basePath %>/analista/analitica" class="btn btn-secondary">Limpiar filtros</a>
         <% } %>
       </form>
