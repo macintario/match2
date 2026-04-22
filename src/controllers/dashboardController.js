@@ -233,6 +233,7 @@ async function analistaDashboard(req, res) {
   });
 
   let horasSolicitadasPorAcademia = [];
+  let detalleSolicitudesPorAcademia = {};
   let horasSolicitadasTotales = {
     totalSolicitudes: 0,
     totalHorasSolicitadas: 0,
@@ -277,17 +278,85 @@ async function analistaDashboard(req, res) {
       }),
       { totalSolicitudes: 0, totalHorasSolicitadas: 0 }
     );
+
+    const detalleRows = await MxgScheduleImport.findAll({
+      where: {
+        uploadId: latestMxgUpload.id,
+        needsAdditionalHours: true,
+      },
+      attributes: ['academiaDesc', 'asignaturaDesc', 'nombre', 'grupo', 'hrsNecesarias'],
+      order: [['academiaDesc', 'ASC'], ['asignaturaDesc', 'ASC'], ['nombre', 'ASC']],
+    });
+
+    detalleSolicitudesPorAcademia = detalleRows.reduce((acc, row) => {
+      const academiaKey = row.get('academiaDesc') || 'Sin academia';
+      if (!acc[academiaKey]) {
+        acc[academiaKey] = [];
+      }
+
+      acc[academiaKey].push({
+        asignaturaDesc: row.get('asignaturaDesc') || '-',
+        docente: row.get('nombre') || '-',
+        grupo: row.get('grupo') || '-',
+        horasSolicitadas: Number(row.get('hrsNecesarias') || 0),
+      });
+
+      return acc;
+    }, {});
   }
 
-  // Histograma hrsXCub de la última carga PXP (intervalos de 2 horas)
+  return res.render('dashboard-analista', {
+    title: 'Panel Analista',
+    report,
+    historicoReport,
+    ruaaReport,
+    mxgReport,
+    horasSolicitadasPorAcademia,
+    detalleSolicitudesPorAcademia,
+    horasSolicitadasTotales,
+    escuelaHorasSolicitadas,
+    recentUploads,
+  });
+}
+
+async function analistaAnalyticsPage(req, res) {
+  const latestMxgUpload = await XmlUpload.findOne({
+    where: { uploadType: 'MXG' },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id'],
+  });
+
+  let escuelaHorasSolicitadas = null;
+  let mxgHeatmap = null;
   let hrsXCubHistogram = [];
+
+  if (latestMxgUpload) {
+    const anyMxgRow = await MxgScheduleImport.findOne({
+      where: { uploadId: latestMxgUpload.id },
+      attributes: ['plantelDesc', 'plantelId'],
+    });
+
+    if (anyMxgRow) {
+      const plantelId = anyMxgRow.get('plantelId');
+      const plantelDesc = anyMxgRow.get('plantelDesc');
+      escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
+    }
+
+    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
+      where: { uploadId: latestMxgUpload.id },
+      attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+    });
+
+    mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
+  }
+
   const latestPxpUpload = await XmlUpload.findOne({
     where: { uploadType: 'PXP' },
     order: [['uploadedAt', 'DESC']],
     attributes: ['id'],
   });
+
   if (latestPxpUpload) {
-    // Filas numéricas agrupadas en intervalos de 2 h
     const freqRows = await TeacherImport.findAll({
       where: {
         uploadId: latestPxpUpload.id,
@@ -310,7 +379,6 @@ async function analistaDashboard(req, res) {
       };
     });
 
-    // Filas no numéricas (vacías u otro texto)
     const nonNumericCount = await TeacherImport.count({
       where: {
         uploadId: latestPxpUpload.id,
@@ -322,54 +390,11 @@ async function analistaDashboard(req, res) {
     }
   }
 
-  return res.render('dashboard-analista', {
-    title: 'Panel Analista',
-    report,
-    historicoReport,
-    ruaaReport,
-    mxgReport,
-    horasSolicitadasPorAcademia,
-    horasSolicitadasTotales,
-    escuelaHorasSolicitadas,
-    recentUploads,
-    hrsXCubHistogram,
-  });
-}
-
-async function analistaAnalyticsPage(req, res) {
-  const latestMxgUpload = await XmlUpload.findOne({
-    where: { uploadType: 'MXG' },
-    order: [['uploadedAt', 'DESC']],
-    attributes: ['id'],
-  });
-
-  let escuelaHorasSolicitadas = null;
-  let mxgHeatmap = null;
-
-  if (latestMxgUpload) {
-    const anyMxgRow = await MxgScheduleImport.findOne({
-      where: { uploadId: latestMxgUpload.id },
-      attributes: ['plantelDesc', 'plantelId'],
-    });
-
-    if (anyMxgRow) {
-      const plantelId = anyMxgRow.get('plantelId');
-      const plantelDesc = anyMxgRow.get('plantelDesc');
-      escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
-    }
-
-    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
-      where: { uploadId: latestMxgUpload.id },
-      attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
-    });
-
-    mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
-  }
-
   return res.render('analista-analitica', {
     title: 'Analitica MXG',
     mxgHeatmap,
     escuelaHorasSolicitadas,
+    hrsXCubHistogram,
   });
 }
 

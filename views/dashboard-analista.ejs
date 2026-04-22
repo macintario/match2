@@ -81,11 +81,56 @@
               <td colspan="3">No hay solicitudes de horas adicionales para reportar.</td>
             </tr>
           <% } %>
-          <% (horasSolicitadasPorAcademia || []).forEach((item) => { %>
+          <% (horasSolicitadasPorAcademia || []).forEach((item, index) => {
+               const detailId = `academia-drilldown-${index}`;
+               const detailRows = (detalleSolicitudesPorAcademia && detalleSolicitudesPorAcademia[item.academiaDesc]) || [];
+          %>
             <tr>
-              <td><%= item.academiaDesc %></td>
+              <td>
+                <button
+                  type="button"
+                  class="drilldown-academia-btn"
+                  data-drilldown-target="<%= detailId %>"
+                  aria-expanded="false"
+                  style="border:0; background:transparent; color:var(--primary); cursor:pointer; font:inherit; padding:0; text-decoration:underline;"
+                >
+                  <%= item.academiaDesc %>
+                </button>
+              </td>
               <td><%= item.totalSolicitudes %></td>
               <td><%= item.totalHorasSolicitadas %></td>
+            </tr>
+            <tr id="<%= detailId %>" class="drilldown-detail-row" style="display:none;">
+              <td colspan="3" style="background:#fff6f8;">
+                <strong>Detalle de solicitudes</strong>
+                <div class="table-wrap" style="margin-top:8px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Materia</th>
+                        <th>Docente</th>
+                        <th>Grupo</th>
+                        <th>Horas solicitadas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% if (!detailRows.length) { %>
+                        <tr>
+                          <td colspan="4">No hay detalle disponible para esta academia.</td>
+                        </tr>
+                      <% } %>
+                      <% detailRows.forEach((detail) => { %>
+                        <tr>
+                          <td><%= detail.asignaturaDesc %></td>
+                          <td><%= detail.docente %></td>
+                          <td><%= detail.grupo %></td>
+                          <td><%= detail.horasSolicitadas %></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              </td>
             </tr>
           <% }) %>
           <% if (horasSolicitadasPorAcademia && horasSolicitadasPorAcademia.length > 0) { %>
@@ -98,108 +143,6 @@
         </tbody>
       </table>
     </div>
-
-    <h3>Histograma de Horas por Cubrir (hrsXCub) — PxP</h3>
-    <% if (!hrsXCubHistogram || hrsXCubHistogram.length === 0) { %>
-      <p>No hay datos de hrsXCub disponibles. Carga un archivo PxP primero.</p>
-    <% } else { %>
-      <div style="overflow-x:auto;">
-        <canvas id="hrsXCubChart" height="320" style="max-width:100%;"></canvas>
-      </div>
-      <script>
-        (function () {
-          const data = <%- JSON.stringify(hrsXCubHistogram) %>;
-          const labels = data.map(function(d) { return d.valor === '' ? '(vacío)' : d.valor; });
-          const values = data.map(function(d) { return d.cantidad; });
-          const maxVal = Math.max.apply(null, values) || 1;
-
-          const canvas = document.getElementById('hrsXCubChart');
-          const ctx = canvas.getContext('2d');
-
-          const BAR_W = 48;
-          const GAP = 12;
-          const PADDING_LEFT = 60;
-          const PADDING_RIGHT = 20;
-          const PADDING_TOP = 30;
-          const PADDING_BOTTOM = 70;
-
-          canvas.width = PADDING_LEFT + (BAR_W + GAP) * labels.length + PADDING_RIGHT;
-          const CHART_H = canvas.height - PADDING_TOP - PADDING_BOTTOM;
-
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-          // Fondo
-          ctx.fillStyle = '#f8f9fa';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          // Eje Y — líneas guía
-          const Y_TICKS = 5;
-          ctx.strokeStyle = '#dee2e6';
-          ctx.lineWidth = 1;
-          ctx.fillStyle = '#555';
-          ctx.font = '11px sans-serif';
-          ctx.textAlign = 'right';
-          for (let i = 0; i <= Y_TICKS; i++) {
-            const y = PADDING_TOP + CHART_H - (CHART_H / Y_TICKS) * i;
-            const tickVal = Math.round((maxVal / Y_TICKS) * i);
-            ctx.beginPath();
-            ctx.moveTo(PADDING_LEFT - 5, y);
-            ctx.lineTo(canvas.width - PADDING_RIGHT, y);
-            ctx.stroke();
-            ctx.fillText(tickVal, PADDING_LEFT - 8, y + 4);
-          }
-
-          // Eje Y label
-          ctx.save();
-          ctx.translate(14, PADDING_TOP + CHART_H / 2);
-          ctx.rotate(-Math.PI / 2);
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#333';
-          ctx.font = '12px sans-serif';
-          ctx.fillText('Docentes', 0, 0);
-          ctx.restore();
-
-          // Barras
-          data.forEach(function (d, i) {
-            const barH = (d.cantidad / maxVal) * CHART_H;
-            const x = PADDING_LEFT + i * (BAR_W + GAP);
-            const y = PADDING_TOP + CHART_H - barH;
-
-            // Color por signo
-            const num = parseFloat(d.valor);
-            ctx.fillStyle = isNaN(num) ? '#adb5bd' : (num < 0 ? '#e55353' : num === 0 ? '#6c757d' : '#4a9eff');
-
-            ctx.fillRect(x, y, BAR_W, barH);
-
-            // Valor encima de la barra
-            ctx.fillStyle = '#333';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'center';
-            if (barH > 14) {
-              ctx.fillText(d.cantidad, x + BAR_W / 2, y - 4);
-            } else {
-              ctx.fillText(d.cantidad, x + BAR_W / 2, y - 4);
-            }
-
-            // Etiqueta eje X
-            ctx.save();
-            ctx.translate(x + BAR_W / 2, PADDING_TOP + CHART_H + 8);
-            ctx.rotate(Math.PI / 4);
-            ctx.textAlign = 'left';
-            ctx.fillStyle = '#444';
-            ctx.font = '11px sans-serif';
-            ctx.fillText(labels[i], 0, 0);
-            ctx.restore();
-          });
-
-          // Eje X label
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#333';
-          ctx.font = '12px sans-serif';
-          ctx.fillText('hrsXCub', canvas.width / 2, canvas.height - 4);
-        })();
-      </script>
-    <% } %>
 
     <% if (report) { %>
       <div class="stats-grid">
@@ -460,6 +403,24 @@
         <p>Se muestran los primeros 80 registros de cada seccion RUAA.</p>
       <% } %>
     <% } %>
+
+    <script>
+      (function () {
+        const buttons = document.querySelectorAll('.drilldown-academia-btn');
+        buttons.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            const targetId = btn.getAttribute('data-drilldown-target');
+            const target = document.getElementById(targetId);
+            if (!target) {
+              return;
+            }
+            const isOpen = target.style.display !== 'none';
+            target.style.display = isOpen ? 'none' : 'table-row';
+            btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+          });
+        });
+      })();
+    </script>
 
     <div class="feature-list">
       <div class="feature-item">

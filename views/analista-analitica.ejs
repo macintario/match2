@@ -15,6 +15,95 @@
       <p><strong>Escuela:</strong> <%= escuelaHorasSolicitadas %></p>
     <% } %>
 
+    <h3>Histograma de Horas por Cubrir (hrsXCub) — PxP</h3>
+    <% if (!hrsXCubHistogram || hrsXCubHistogram.length === 0) { %>
+      <p>No hay datos de hrsXCub disponibles. Carga un archivo PxP primero.</p>
+    <% } else { %>
+      <div style="overflow-x:auto;">
+        <canvas id="hrsXCubChart" height="320" style="max-width:100%;"></canvas>
+      </div>
+      <script>
+        (function () {
+          const data = <%- JSON.stringify(hrsXCubHistogram) %>;
+          const labels = data.map(function(d) { return d.valor === '' ? '(vacío)' : d.valor; });
+          const values = data.map(function(d) { return d.cantidad; });
+          const maxVal = Math.max.apply(null, values) || 1;
+
+          const canvas = document.getElementById('hrsXCubChart');
+          const ctx = canvas.getContext('2d');
+
+          const BAR_W = 48;
+          const GAP = 12;
+          const PADDING_LEFT = 60;
+          const PADDING_RIGHT = 20;
+          const PADDING_TOP = 30;
+          const PADDING_BOTTOM = 70;
+
+          canvas.width = PADDING_LEFT + (BAR_W + GAP) * labels.length + PADDING_RIGHT;
+          const CHART_H = canvas.height - PADDING_TOP - PADDING_BOTTOM;
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          ctx.fillStyle = '#f8f9fa';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          const Y_TICKS = 5;
+          ctx.strokeStyle = '#dee2e6';
+          ctx.lineWidth = 1;
+          ctx.fillStyle = '#555';
+          ctx.font = '11px sans-serif';
+          ctx.textAlign = 'right';
+          for (let i = 0; i <= Y_TICKS; i++) {
+            const y = PADDING_TOP + CHART_H - (CHART_H / Y_TICKS) * i;
+            const tickVal = Math.round((maxVal / Y_TICKS) * i);
+            ctx.beginPath();
+            ctx.moveTo(PADDING_LEFT - 5, y);
+            ctx.lineTo(canvas.width - PADDING_RIGHT, y);
+            ctx.stroke();
+            ctx.fillText(tickVal, PADDING_LEFT - 8, y + 4);
+          }
+
+          ctx.save();
+          ctx.translate(14, PADDING_TOP + CHART_H / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#333';
+          ctx.font = '12px sans-serif';
+          ctx.fillText('Docentes', 0, 0);
+          ctx.restore();
+
+          data.forEach(function (d, i) {
+            const barH = (d.cantidad / maxVal) * CHART_H;
+            const x = PADDING_LEFT + i * (BAR_W + GAP);
+            const y = PADDING_TOP + CHART_H - barH;
+
+            const num = parseFloat(d.valor);
+            ctx.fillStyle = isNaN(num) ? '#adb5bd' : (num < 0 ? '#e55353' : num === 0 ? '#6c757d' : '#4a9eff');
+            ctx.fillRect(x, y, BAR_W, barH);
+
+            ctx.fillStyle = '#333';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(d.cantidad, x + BAR_W / 2, y - 4);
+
+            ctx.save();
+            ctx.translate(x + BAR_W / 2, PADDING_TOP + CHART_H + 8);
+            ctx.rotate(Math.PI / 4);
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#444';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(labels[i], 0, 0);
+            ctx.restore();
+          });
+
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#333';
+          ctx.font = '12px sans-serif';
+          ctx.fillText('hrsXCub', canvas.width / 2, canvas.height - 4);
+        })();
+      </script>
+    <% } %>
+
     <% if (mxgHeatmap && mxgHeatmap.slotLabels && mxgHeatmap.slotLabels.length > 0) { %>
       <h3>Mapa de calor de grupos activos (MXG)</h3>
       <p>Intervalos de 30 minutos desde 07:00 hasta 22:00 hrs.</p>
