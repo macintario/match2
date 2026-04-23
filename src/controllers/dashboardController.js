@@ -592,7 +592,7 @@ async function generateAnalistaSubstitutionProposals(req, res) {
 
     const eligibleTeachers = teachers.filter((t) => Number(String(t.hrsXCub).replace(',', '.')) > 0);
 
-    const proposals = generateSubstitutionProposals({
+    const generationResult = generateSubstitutionProposals({
       mxgRequests,
       teachers: eligibleTeachers,
       historicalRows,
@@ -605,6 +605,8 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       },
       generatedByUserId: req.session.user.id,
     });
+
+    const proposals = generationResult.proposals;
 
     await sequelize.transaction(async (transaction) => {
       await SubstitutionProposal.destroy({ where: {}, transaction });
@@ -640,11 +642,14 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       }
     );
 
-    req.session.proposalGenerationReport = totals;
+    req.session.proposalGenerationReport = {
+      ...totals,
+      teachersWithoutHistoricalReport: generationResult.teachersWithoutHistoricalReport,
+    };
     setFlash(
       req,
       'success',
-      `Propuestas generadas: ${totals.totalPropuestas} | Horas asignadas: ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno: ${totals.conflictosTurno} | Conflictos horario: ${totals.conflictosHorario}.`
+      `Propuestas generadas: ${totals.totalPropuestas} | Horas asignadas: ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno: ${totals.conflictosTurno} | Conflictos horario: ${totals.conflictosHorario} | Docentes PxP sin HISTORICO: ${generationResult.teachersWithoutHistoricalReport.totalTeachersWithoutHistorical}.`
     );
     return res.redirect('/analista/propuestas');
   } catch (error) {

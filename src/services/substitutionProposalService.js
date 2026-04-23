@@ -265,6 +265,39 @@ function addRequestSlotsToTeacherProposed(proposedSlots, request) {
   }
 }
 
+function buildTeachersWithoutHistoricalReport(teachers, historicalByTeacher) {
+  const rows = teachers
+    .filter((teacher) => {
+      const teacherKey = `${teacher.numEmp || ''}|${teacher.rfc || ''}`;
+      return !historicalByTeacher.has(teacherKey);
+    })
+    .map((teacher) => ({
+      teacherImportId: teacher.id,
+      numEmp: teacher.numEmp || null,
+      rfc: teacher.rfc || null,
+      nombre: teacher.nombre || null,
+      plantelId: teacher.plantelId || null,
+      plantel: teacher.plantel || null,
+      turno: teacher.turno || null,
+      hrsXCub: toNumber(teacher.hrsXCub),
+      reason: 'Sin coincidencias en HISTORICO para este docente.',
+    }))
+    .sort((a, b) => {
+      if ((b.hrsXCub || 0) !== (a.hrsXCub || 0)) {
+        return (b.hrsXCub || 0) - (a.hrsXCub || 0);
+      }
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', {
+        sensitivity: 'base',
+      });
+    });
+
+  return {
+    totalTeachersWithoutHistorical: rows.length,
+    totalHoursWithoutHistorical: rows.reduce((acc, row) => acc + toNumber(row.hrsXCub), 0),
+    rows,
+  };
+}
+
 function generateSubstitutionProposals({
   mxgRequests,
   teachers,
@@ -283,6 +316,10 @@ function generateSubstitutionProposals({
   }
 
   const teacherRuaaIndex = buildTeacherHorarioIndex(ruaaRows);
+  const teachersWithoutHistoricalReport = buildTeachersWithoutHistoricalReport(
+    teachers,
+    historicalByTeacher
+  );
 
   const teacherState = teachers.map((teacher) => ({
     teacher,
@@ -380,7 +417,10 @@ function generateSubstitutionProposals({
     }
   }
 
-  return proposals;
+  return {
+    proposals,
+    teachersWithoutHistoricalReport,
+  };
 }
 
 module.exports = {

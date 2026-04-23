@@ -27,6 +27,45 @@
           conflictos de turno: <strong><%= proposalGenerationReport.conflictosTurno %></strong>,
           conflictos de horario: <strong><%= proposalGenerationReport.conflictosHorario %></strong>.
         </p>
+        <% if (proposalGenerationReport.teachersWithoutHistoricalReport) { %>
+          <p>
+            Docentes PxP sin HISTORICO: <strong><%= proposalGenerationReport.teachersWithoutHistoricalReport.totalTeachersWithoutHistorical %></strong>
+            | Horas no candidatas por esta causa:
+            <strong><%= Number(proposalGenerationReport.teachersWithoutHistoricalReport.totalHoursWithoutHistorical || 0).toFixed(2) %></strong>.
+          </p>
+        <% } %>
+      </div>
+    <% } %>
+
+    <% if (proposalGenerationReport && proposalGenerationReport.teachersWithoutHistoricalReport && proposalGenerationReport.teachersWithoutHistoricalReport.rows && proposalGenerationReport.teachersWithoutHistoricalReport.rows.length > 0) { %>
+      <h3>Docentes de PxP excluidos por falta de HISTORICO</h3>
+      <p>Estos docentes tienen hrsXCub mayores a 0 en PxP, pero no aparecen en HISTORICO, por lo que no entran como candidatos de propuestas.</p>
+
+      <div class="table-wrap" style="margin-bottom:16px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Docente</th>
+              <th>Num. Emp</th>
+              <th>RFC</th>
+              <th>Turno</th>
+              <th>hrsXCub</th>
+              <th>Motivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% proposalGenerationReport.teachersWithoutHistoricalReport.rows.forEach((item) => { %>
+              <tr>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.numEmp || '-' %></td>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.turno || '-' %></td>
+                <td><%= Number(item.hrsXCub || 0).toFixed(2) %></td>
+                <td><%= item.reason %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
       </div>
     <% } %>
 
