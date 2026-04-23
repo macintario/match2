@@ -103,60 +103,6 @@
       </script>
     <% } %>
 
-    <% if (labDominanceReport) { %>
-      <h3>Docentes con predominio de horas en <%= labDominanceReport.targetType %></h3>
-      <p>
-        Se muestran docentes donde las horas de <strong><%= labDominanceReport.targetType %></strong>
-        son mayores que las horas de cualquier otro tipo de asignatura.
-      </p>
-
-      <% if (!labDominanceReport.rows || labDominanceReport.rows.length === 0) { %>
-        <p>No se encontraron docentes con predominio en <%= labDominanceReport.targetType %>.</p>
-      <% } else { %>
-        <p><strong>Total docentes:</strong> <%= labDominanceReport.totalDocentes %></p>
-        <% const exportLabParams = []; %>
-        <% if (filterSemNivel && hasSemNivelField) exportLabParams.push(`semNivel=${encodeURIComponent(filterSemNivel)}`); %>
-        <% if (filterAcademia) exportLabParams.push(`academia=${encodeURIComponent(filterAcademia)}`); %>
-        <% if (filterAsigTipo && hasAsigTipoField) exportLabParams.push(`asigTipo=${encodeURIComponent(filterAsigTipo)}`); %>
-        <% if (filterModalidad) exportLabParams.push(`modalidad=${encodeURIComponent(filterModalidad)}`); %>
-        <% if (filterCarreraDesc) exportLabParams.push(`carreraDesc=${encodeURIComponent(filterCarreraDesc)}`); %>
-        <% const exportLabQuery = exportLabParams.length ? `?${exportLabParams.join('&')}` : ''; %>
-        <div style="margin-bottom:10px;">
-          <a href="<%= basePath %>/analista/analitica/export-laboratorio-csv<%= exportLabQuery %>" class="btn btn-secondary">Descargar reporte CSV</a>
-        </div>
-        <div class="table-wrap" style="margin-bottom:1rem;">
-          <table>
-            <thead>
-              <tr>
-                <th>Docente</th>
-                <th>Num. Emp</th>
-                <th>RFC</th>
-                <th>Horas L-LABORATORIO</th>
-                <th>Otro tipo con mas horas</th>
-                <th>Horas de ese otro tipo</th>
-                <th>Total horas</th>
-                <th>% L-LABORATORIO</th>
-              </tr>
-            </thead>
-            <tbody>
-              <% labDominanceReport.rows.forEach(function(item) { %>
-                <tr>
-                  <td><%= item.nombre || '-' %></td>
-                  <td><%= item.numEmp || '-' %></td>
-                  <td><%= item.rfc || '-' %></td>
-                  <td><%= Number(item.laboratorioHours || 0).toFixed(2) %></td>
-                  <td><%= item.topOtherType || '-' %></td>
-                  <td><%= Number(item.topOtherHours || 0).toFixed(2) %></td>
-                  <td><%= Number(item.totalHours || 0).toFixed(2) %></td>
-                  <td><%= Number(item.laboratorioShare || 0).toFixed(2) %>%</td>
-                </tr>
-              <% }) %>
-            </tbody>
-          </table>
-        </div>
-      <% } %>
-    <% } %>
-
     <% if (mxgHeatmap && mxgHeatmap.slotLabels && mxgHeatmap.slotLabels.length > 0) { %>
       <h3>Mapa de calor de grupos activos (MXG)</h3>
       <p>Intervalos de 30 minutos desde 07:00 hasta 22:00 hrs.</p>
@@ -277,6 +223,60 @@
       </div>
     <% } else { %>
       <p>No hay datos MXG disponibles para construir el mapa de calor.</p>
+    <% } %>
+
+    <% if (labDominanceReport) { %>
+      <h3>Docentes con predominio de horas en <%= labDominanceReport.targetType %></h3>
+      <p>
+        Se muestran docentes donde las horas de <strong><%= labDominanceReport.targetType %></strong>
+        son mayores que las horas de cualquier otro tipo de asignatura.
+      </p>
+
+      <% if (!labDominanceReport.rows || labDominanceReport.rows.length === 0) { %>
+        <p>No se encontraron docentes con predominio en <%= labDominanceReport.targetType %>.</p>
+      <% } else { %>
+        <p><strong>Total docentes:</strong> <%= labDominanceReport.totalDocentes %></p>
+        <% const exportLabParams = []; %>
+        <% if (filterSemNivel && hasSemNivelField) exportLabParams.push(`semNivel=${encodeURIComponent(filterSemNivel)}`); %>
+        <% if (filterAcademia) exportLabParams.push(`academia=${encodeURIComponent(filterAcademia)}`); %>
+        <% if (filterAsigTipo && hasAsigTipoField) exportLabParams.push(`asigTipo=${encodeURIComponent(filterAsigTipo)}`); %>
+        <% if (filterModalidad) exportLabParams.push(`modalidad=${encodeURIComponent(filterModalidad)}`); %>
+        <% if (filterCarreraDesc) exportLabParams.push(`carreraDesc=${encodeURIComponent(filterCarreraDesc)}`); %>
+        <% const exportLabQuery = exportLabParams.length ? `?${exportLabParams.join('&')}` : ''; %>
+        <div style="margin-bottom:10px;">
+          <a href="<%= basePath %>/analista/analitica/export-laboratorio-csv<%= exportLabQuery %>" class="btn btn-secondary">Descargar reporte CSV</a>
+        </div>
+        <div class="table-wrap" style="margin-bottom:1rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Docente</th>
+                <th>Num. Emp</th>
+                <th>RFC</th>
+                <th>Horas L-LABORATORIO</th>
+                <th>Otro tipo con mas horas</th>
+                <th>Horas de ese otro tipo</th>
+                <th>Total horas</th>
+                <th>% L-LABORATORIO</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% labDominanceReport.rows.forEach(function(item) { %>
+                <tr>
+                  <td><%= item.nombre || '-' %></td>
+                  <td><%= item.numEmp || '-' %></td>
+                  <td><%= item.rfc || '-' %></td>
+                  <td><%= Number(item.laboratorioHours || 0).toFixed(2) %></td>
+                  <td><%= item.topOtherType || '-' %></td>
+                  <td><%= Number(item.topOtherHours || 0).toFixed(2) %></td>
+                  <td><%= Number(item.totalHours || 0).toFixed(2) %></td>
+                  <td><%= Number(item.laboratorioShare || 0).toFixed(2) %>%</td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
     <% } %>
   </section>
 </main>
