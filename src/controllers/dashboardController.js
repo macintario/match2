@@ -113,6 +113,104 @@ function parseMxgDayRanges(value) {
   return ranges;
 }
 
+function normalizeAsigTipoValue(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+function getMxgRowTotalHours(row) {
+  const days = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+  let minutes = 0;
+
+  for (const day of days) {
+    const ranges = parseMxgDayRanges(row[day]);
+    for (const range of ranges) {
+      minutes += Math.max(0, range.end - range.start);
+    }
+  }
+
+  return minutes / 60;
+}
+
+function buildLabDominanceReport(rows) {
+  const LAB_TYPE = 'L-LABORATORIO';
+  const byTeacher = new Map();
+
+  for (const row of rows) {
+    const teacherKey = `${row.numEmp || ''}|${row.rfc || ''}|${row.nombre || ''}`;
+    if (!byTeacher.has(teacherKey)) {
+      byTeacher.set(teacherKey, {
+        numEmp: row.numEmp || null,
+        rfc: row.rfc || null,
+        nombre: row.nombre || null,
+        byType: new Map(),
+      });
+    }
+
+    const teacher = byTeacher.get(teacherKey);
+    const asigTipo = normalizeAsigTipoValue(row.asigTipo);
+    const rowHours = getMxgRowTotalHours(row);
+    if (!asigTipo || rowHours <= 0) {
+      continue;
+    }
+
+    teacher.byType.set(asigTipo, (teacher.byType.get(asigTipo) || 0) + rowHours);
+  }
+
+  const dominantRows = [];
+
+  for (const teacher of byTeacher.values()) {
+    const labHours = teacher.byType.get(LAB_TYPE) || 0;
+    if (labHours <= 0) {
+      continue;
+    }
+
+    let maxOtherHours = 0;
+    let maxOtherType = '-';
+    let totalHours = 0;
+    for (const [type, hours] of teacher.byType.entries()) {
+      totalHours += hours;
+      if (type !== LAB_TYPE && hours > maxOtherHours) {
+        maxOtherHours = hours;
+        maxOtherType = type;
+      }
+    }
+
+    if (labHours > maxOtherHours) {
+      dominantRows.push({
+        numEmp: teacher.numEmp,
+        rfc: teacher.rfc,
+        nombre: teacher.nombre,
+        laboratorioHours: labHours,
+        topOtherType: maxOtherType,
+        topOtherHours: maxOtherHours,
+        totalHours,
+        laboratorioShare: totalHours > 0 ? (labHours / totalHours) * 100 : 0,
+      });
+    }
+  }
+
+  dominantRows.sort((a, b) => {
+    if (b.laboratorioHours !== a.laboratorioHours) {
+      return b.laboratorioHours - a.laboratorioHours;
+    }
+    if (b.totalHours !== a.totalHours) {
+      return b.totalHours - a.totalHours;
+    }
+    return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+  });
+
+  return {
+    targetType: LAB_TYPE,
+    totalDocentes: dominantRows.length,
+    rows: dominantRows,
+  };
+}
+
 function buildMxgHeatmap(rows) {
   const days = [
     { key: 'lunes', label: 'Lunes' },
@@ -371,6 +469,7 @@ async function analistaAnalyticsPage(req, res) {
   let asigTipoOptions = [];
   let modalidadOptions = [];
   let carreraDescOptions = [];
+  let labDominanceReport = null;
   let hasSemNivelField = false;
   let hasAsigTipoField = false;
 
@@ -444,6 +543,15 @@ async function analistaAnalyticsPage(req, res) {
     });
 
     mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
+
+    if (hasAsigTipoField) {
+      const mxgRowsForLabDominance = await MxgScheduleImport.findAll({
+        where: { uploadId: latestMxgUpload.id },
+        attributes: ['numEmp', 'rfc', 'nombre', 'asigTipo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+        raw: true,
+      });
+      labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance);
+    }
   }
 
   const latestPxpUpload = await XmlUpload.findOne({
@@ -491,6 +599,7 @@ async function analistaAnalyticsPage(req, res) {
     mxgHeatmap,
     escuelaHorasSolicitadas,
     hrsXCubHistogram,
+    labDominanceReport,
     semNivelOptions,
     academiaOptions,
     asigTipoOptions,
@@ -730,6 +839,104 @@ async function exportSubstitutionProposalsCsv(req, res) {
   } catch (error) {
     setFlash(req, 'error', `No se pudo exportar CSV: ${error.message}`);
     return res.redirect('/analista/propuestas');
+  }
+}
+
+async function exportLabDominanceCsv(req, res) {
+  try {
+    const filterSemNivel = req.query.semNivel || '';
+    const filterAcademia = req.query.academia || '';
+    const filterAsigTipo = req.query.asigTipo || '';
+    const filterModalidad = req.query.modalidad || '';
+    const filterCarreraDesc = req.query.carreraDesc || '';
+
+    const latestMxgUpload = await XmlUpload.findOne({
+      where: { uploadType: 'MXG' },
+      order: [['uploadedAt', 'DESC']],
+      attributes: ['id'],
+    });
+
+    if (!latestMxgUpload) {
+      setFlash(req, 'error', 'No hay carga MXG disponible para exportar.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const queryInterface = sequelize.getQueryInterface();
+    const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
+    if (!mxgTableColumns.asigTipo) {
+      setFlash(req, 'error', 'La tabla MXG no tiene la columna asigTipo disponible.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const heatmapWhere = { uploadId: latestMxgUpload.id };
+    if (filterSemNivel && mxgTableColumns.semNivel) heatmapWhere.semNivel = filterSemNivel;
+    if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
+    if (filterAsigTipo && mxgTableColumns.asigTipo) heatmapWhere.asigTipo = filterAsigTipo;
+    if (filterModalidad) heatmapWhere.modalidad = filterModalidad;
+    if (filterCarreraDesc) heatmapWhere.carreraDesc = filterCarreraDesc;
+
+    const mxgRows = await MxgScheduleImport.findAll({
+      where: heatmapWhere,
+      attributes: ['numEmp', 'rfc', 'nombre', 'asigTipo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+      raw: true,
+    });
+
+    const report = buildLabDominanceReport(mxgRows);
+    const appliedFilters = {
+      semNivel: filterSemNivel && mxgTableColumns.semNivel ? filterSemNivel : '',
+      academia: filterAcademia,
+      asigTipo: filterAsigTipo && mxgTableColumns.asigTipo ? filterAsigTipo : '',
+      modalidad: filterModalidad,
+      carreraDesc: filterCarreraDesc,
+    };
+
+    const headers = [
+      'numEmp',
+      'rfc',
+      'nombre',
+      'targetType',
+      'laboratorioHours',
+      'topOtherType',
+      'topOtherHours',
+      'totalHours',
+      'laboratorioShare',
+    ];
+
+    const lines = [
+      'metadata,valor',
+      `filtro_semNivel,${csvEscape(appliedFilters.semNivel)}`,
+      `filtro_academia,${csvEscape(appliedFilters.academia)}`,
+      `filtro_asigTipo,${csvEscape(appliedFilters.asigTipo)}`,
+      `filtro_modalidad,${csvEscape(appliedFilters.modalidad)}`,
+      `filtro_carreraDesc,${csvEscape(appliedFilters.carreraDesc)}`,
+      `total_docentes,${csvEscape(report.totalDocentes)}`,
+      `tipo_objetivo,${csvEscape(report.targetType)}`,
+      '',
+      headers.join(','),
+    ];
+    for (const item of report.rows) {
+      const rowData = {
+        numEmp: item.numEmp || '',
+        rfc: item.rfc || '',
+        nombre: item.nombre || '',
+        targetType: report.targetType,
+        laboratorioHours: Number(item.laboratorioHours || 0).toFixed(2),
+        topOtherType: item.topOtherType || '',
+        topOtherHours: Number(item.topOtherHours || 0).toFixed(2),
+        totalHours: Number(item.totalHours || 0).toFixed(2),
+        laboratorioShare: Number(item.laboratorioShare || 0).toFixed(2),
+      };
+      const values = headers.map((key) => csvEscape(rowData[key]));
+      lines.push(values.join(','));
+    }
+
+    const fileName = `docentes_predominio_laboratorio_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV del reporte de laboratorio: ${error.message}`);
+    return res.redirect('/analista/analitica');
   }
 }
 
@@ -1169,5 +1376,6 @@ module.exports = {
   generateAnalistaSubstitutionProposals,
   updateProposalStatus,
   exportSubstitutionProposalsCsv,
+  exportLabDominanceCsv,
   escuelaDashboard,
 };
