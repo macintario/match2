@@ -136,22 +136,71 @@ function getMxgRowTotalHours(row) {
   return minutes / 60;
 }
 
-function buildLabDominanceReport(rows) {
+function normalizeNumEmpKey(value) {
+  return String(value || '').trim();
+}
+
+function isValidNumEmp(value) {
+  const normalized = normalizeNumEmpKey(value);
+  if (!normalized) {
+    return false;
+  }
+
+  return !/^0+(?:\.0+)?$/.test(normalized);
+}
+
+function buildPxpTeacherLookup(rows) {
+  const byNumEmp = new Map();
+
+  for (const row of rows || []) {
+    const numEmp = normalizeNumEmpKey(row.numEmp);
+    if (!isValidNumEmp(numEmp)) {
+      continue;
+    }
+
+    if (!byNumEmp.has(numEmp)) {
+      byNumEmp.set(numEmp, {
+        rfc: row.rfc || null,
+        nombre: row.nombre || null,
+      });
+    }
+  }
+
+  return byNumEmp;
+}
+
+function buildLabDominanceReport(rows, pxpTeacherByNumEmp = new Map()) {
   const LAB_TYPE = 'L-LABORATORIO';
   const byTeacher = new Map();
 
   for (const row of rows) {
-    const teacherKey = `${row.numEmp || ''}|${row.rfc || ''}|${row.nombre || ''}`;
+    const numEmp = normalizeNumEmpKey(row.numEmp);
+    if (!isValidNumEmp(numEmp)) {
+      continue;
+    }
+
+    const pxpTeacher = pxpTeacherByNumEmp.get(numEmp);
+    const resolvedRfc = pxpTeacher?.rfc || row.rfc || null;
+    const resolvedNombre = pxpTeacher?.nombre || row.nombre || null;
+    const teacherKey = numEmp;
+
     if (!byTeacher.has(teacherKey)) {
       byTeacher.set(teacherKey, {
-        numEmp: row.numEmp || null,
-        rfc: row.rfc || null,
-        nombre: row.nombre || null,
+        numEmp,
+        rfc: resolvedRfc,
+        nombre: resolvedNombre,
         byType: new Map(),
       });
     }
 
     const teacher = byTeacher.get(teacherKey);
+    if (!teacher.rfc && resolvedRfc) {
+      teacher.rfc = resolvedRfc;
+    }
+    if (!teacher.nombre && resolvedNombre) {
+      teacher.nombre = resolvedNombre;
+    }
+
     const asigTipo = normalizeAsigTipoValue(row.asigTipo);
     const rowHours = getMxgRowTotalHours(row);
     if (!asigTipo || rowHours <= 0) {
@@ -470,8 +519,25 @@ async function analistaAnalyticsPage(req, res) {
   let modalidadOptions = [];
   let carreraDescOptions = [];
   let labDominanceReport = null;
+  let latestPxpUpload = null;
+  let pxpTeacherByNumEmp = new Map();
   let hasSemNivelField = false;
   let hasAsigTipoField = false;
+
+  latestPxpUpload = await XmlUpload.findOne({
+    where: { uploadType: 'PXP' },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id'],
+  });
+
+  if (latestPxpUpload) {
+    const pxpTeacherRows = await TeacherImport.findAll({
+      where: { uploadId: latestPxpUpload.id },
+      attributes: ['numEmp', 'rfc', 'nombre'],
+      raw: true,
+    });
+    pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
+  }
 
   if (latestMxgUpload) {
     const queryInterface = sequelize.getQueryInterface();
@@ -550,15 +616,9 @@ async function analistaAnalyticsPage(req, res) {
         attributes: ['numEmp', 'rfc', 'nombre', 'asigTipo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
         raw: true,
       });
-      labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance);
+      labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance, pxpTeacherByNumEmp);
     }
   }
-
-  const latestPxpUpload = await XmlUpload.findOne({
-    where: { uploadType: 'PXP' },
-    order: [['uploadedAt', 'DESC']],
-    attributes: ['id'],
-  });
 
   if (latestPxpUpload) {
     const freqRows = await TeacherImport.findAll({
@@ -881,7 +941,23 @@ async function exportLabDominanceCsv(req, res) {
       raw: true,
     });
 
-    const report = buildLabDominanceReport(mxgRows);
+    const latestPxpUpload = await XmlUpload.findOne({
+      where: { uploadType: 'PXP' },
+      order: [['uploadedAt', 'DESC']],
+      attributes: ['id'],
+    });
+
+    let pxpTeacherByNumEmp = new Map();
+    if (latestPxpUpload) {
+      const pxpTeacherRows = await TeacherImport.findAll({
+        where: { uploadId: latestPxpUpload.id },
+        attributes: ['numEmp', 'rfc', 'nombre'],
+        raw: true,
+      });
+      pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
+    }
+
+    const report = buildLabDominanceReport(mxgRows, pxpTeacherByNumEmp);
     const appliedFilters = {
       semNivel: filterSemNivel && mxgTableColumns.semNivel ? filterSemNivel : '',
       academia: filterAcademia,
