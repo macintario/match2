@@ -863,32 +863,32 @@ async function exportSubstitutionProposalsCsv(req, res) {
       limit: 20000,
     });
 
-    const headers = [
-      'id',
-      'proposalStatus',
-      'teacherNombre',
-      'teacherNumEmp',
-      'teacherRfc',
-      'requestSubjectId',
-      'requestSubjectDesc',
-      'requestGroup',
-      'requestTurno',
-      'assignedHours',
-      'requestHours',
-      'requestRemainingHours',
-      'teacherRemainingBefore',
-      'teacherRemainingAfter',
-      'subjectMatchType',
-      'subjectSimilarity',
-      'hasTurnoConflict',
-      'hasHorarioConflict',
-      'conflictDetails',
-      'createdAt',
+    const columns = [
+      { key: 'id', label: 'ID de propuesta' },
+      { key: 'proposalStatus', label: 'Estatus de propuesta' },
+      { key: 'teacherNombre', label: 'Nombre del docente' },
+      { key: 'teacherNumEmp', label: 'Numero de empleado' },
+      { key: 'teacherRfc', label: 'RFC del docente' },
+      { key: 'requestSubjectId', label: 'ID de materia solicitada' },
+      { key: 'requestSubjectDesc', label: 'Materia solicitada' },
+      { key: 'requestGroup', label: 'Grupo solicitado' },
+      { key: 'requestTurno', label: 'Turno solicitado' },
+      { key: 'assignedHours', label: 'Horas asignadas' },
+      { key: 'requestHours', label: 'Horas requeridas' },
+      { key: 'requestRemainingHours', label: 'Horas pendientes por cubrir' },
+      { key: 'teacherRemainingBefore', label: 'Horas disponibles antes de asignar' },
+      { key: 'teacherRemainingAfter', label: 'Horas disponibles despues de asignar' },
+      { key: 'subjectMatchType', label: 'Tipo de coincidencia de materia' },
+      { key: 'subjectSimilarity', label: 'Similitud de materia' },
+      { key: 'hasTurnoConflict', label: 'Tiene conflicto de turno' },
+      { key: 'hasHorarioConflict', label: 'Tiene conflicto de horario' },
+      { key: 'conflictDetails', label: 'Detalles de conflicto' },
+      { key: 'createdAt', label: 'Fecha de creacion' },
     ];
 
-    const lines = [headers.join(',')];
+    const lines = [columns.map((col) => csvEscape(col.label)).join(',')];
     for (const item of rows) {
-      const values = headers.map((key) => csvEscape(item.get(key)));
+      const values = columns.map((col) => csvEscape(item.get(col.key)));
       lines.push(values.join(','));
     }
 
@@ -966,29 +966,29 @@ async function exportLabDominanceCsv(req, res) {
       carreraDesc: filterCarreraDesc,
     };
 
-    const headers = [
-      'numEmp',
-      'rfc',
-      'nombre',
-      'targetType',
-      'laboratorioHours',
-      'topOtherType',
-      'topOtherHours',
-      'totalHours',
-      'laboratorioShare',
+    const columns = [
+      { key: 'numEmp', label: 'Numero de empleado' },
+      { key: 'rfc', label: 'RFC' },
+      { key: 'nombre', label: 'Nombre del docente' },
+      { key: 'targetType', label: 'Tipo objetivo' },
+      { key: 'laboratorioHours', label: 'Horas L-LABORATORIO' },
+      { key: 'topOtherType', label: 'Otro tipo con mas horas' },
+      { key: 'topOtherHours', label: 'Horas de ese otro tipo' },
+      { key: 'totalHours', label: 'Total de horas' },
+      { key: 'laboratorioShare', label: 'Porcentaje L-LABORATORIO' },
     ];
 
     const lines = [
-      'metadata,valor',
-      `filtro_semNivel,${csvEscape(appliedFilters.semNivel)}`,
-      `filtro_academia,${csvEscape(appliedFilters.academia)}`,
-      `filtro_asigTipo,${csvEscape(appliedFilters.asigTipo)}`,
-      `filtro_modalidad,${csvEscape(appliedFilters.modalidad)}`,
-      `filtro_carreraDesc,${csvEscape(appliedFilters.carreraDesc)}`,
-      `total_docentes,${csvEscape(report.totalDocentes)}`,
-      `tipo_objetivo,${csvEscape(report.targetType)}`,
+      'Campo,Valor',
+      `Filtro Sem/Nivel,${csvEscape(appliedFilters.semNivel)}`,
+      `Filtro academia,${csvEscape(appliedFilters.academia)}`,
+      `Filtro tipo de asignatura,${csvEscape(appliedFilters.asigTipo)}`,
+      `Filtro modalidad,${csvEscape(appliedFilters.modalidad)}`,
+      `Filtro carrera,${csvEscape(appliedFilters.carreraDesc)}`,
+      `Total de docentes,${csvEscape(report.totalDocentes)}`,
+      `Tipo objetivo,${csvEscape(report.targetType)}`,
       '',
-      headers.join(','),
+      columns.map((col) => csvEscape(col.label)).join(','),
     ];
     for (const item of report.rows) {
       const rowData = {
@@ -1002,7 +1002,7 @@ async function exportLabDominanceCsv(req, res) {
         totalHours: Number(item.totalHours || 0).toFixed(2),
         laboratorioShare: Number(item.laboratorioShare || 0).toFixed(2),
       };
-      const values = headers.map((key) => csvEscape(rowData[key]));
+      const values = columns.map((col) => csvEscape(rowData[col.key]));
       lines.push(values.join(','));
     }
 
