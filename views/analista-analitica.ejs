@@ -31,6 +31,68 @@
       <p style="color:#8a6d3b;">Selecciona una escuela para consultar analitica y reportes.</p>
     <% } %>
 
+    <h3>Reporte: tecnicos docentes con carga</h3>
+    <% if (!tecnicoDocentesConCargaReport) { %>
+      <p>Sin datos para generar el reporte. Carga PxP y MXG para la escuela activa.</p>
+    <% } else { %>
+      <% if (!tecnicoDocentesConCargaReport.categorySourceAvailable) { %>
+        <div class="alert alert-error">
+          No se pudo consultar la tabla CATEG (CAT_SIMPLE).<br />
+          Detalle: <%= tecnicoDocentesConCargaReport.categorySourceError || 'Sin detalle.' %>
+        </div>
+      <% } %>
+
+      <p>
+        <strong>Docentes:</strong> <%= tecnicoDocentesConCargaReport.totalDocentes %>
+        | <strong>Suma HRSFTG:</strong> <%= tecnicoDocentesConCargaReport.totalHrsFtg %>
+        | <strong>Suma HRSNECESARIAS:</strong> <%= tecnicoDocentesConCargaReport.totalHrsNecesarias %>
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>NumEmp</th>
+              <th>RFC</th>
+              <th>Docente</th>
+              <th>Categoria dictaminada</th>
+              <th>Cat simple (dictamen)</th>
+              <th>Categoria(s) plaza MXG</th>
+              <th>Cat simple tecnico (plaza)</th>
+              <th>HRSFTG</th>
+              <th>HRSNECESARIAS</th>
+              <th>Tecnico por</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!tecnicoDocentesConCargaReport.rows || tecnicoDocentesConCargaReport.rows.length === 0) { %>
+              <tr>
+                <td colspan="10">No hay tecnicos docentes con carga (HRSFTG o HRSNECESARIAS distinto de 0) para la escuela activa.</td>
+              </tr>
+            <% } %>
+            <% (tecnicoDocentesConCargaReport.rows || []).forEach(function(item) { %>
+              <tr>
+                <td><%= item.numEmp || '-' %></td>
+                <td><%= item.rfc || '-' %></td>
+                <td><%= item.nombre || '-' %></td>
+                <td><%= item.categoriaDictaminada %></td>
+                <td><%= item.catSimpleDictamen %></td>
+                <td><%= item.categoriaPlaza %></td>
+                <td><%= item.catSimplePlaza %></td>
+                <td><%= item.totalHrsFtg %></td>
+                <td><%= item.totalHrsNecesarias %></td>
+                <td>
+                  <%= item.esTecnicoPorDictamen ? 'DICTAMEN' : '' %>
+                  <%= item.esTecnicoPorDictamen && item.esTecnicoPorPlaza ? ' + ' : '' %>
+                  <%= item.esTecnicoPorPlaza ? 'PLAZA' : '' %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+
     <h3>Histograma de Horas por Cubrir (hrsXCub) — PxP</h3>
     <% if (!hrsXCubHistogram || hrsXCubHistogram.length === 0) { %>
       <p>No hay datos de hrsXCub disponibles. Carga un archivo PxP primero.</p>

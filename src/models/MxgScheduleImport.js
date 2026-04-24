@@ -81,7 +81,15 @@ const MxgScheduleImport = sequelize.define(
       type: DataTypes.STRING(255),
       allowNull: true,
     },
+    plaza: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
     hrsAsig: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+    },
+    hrsFtg: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: true,
     },

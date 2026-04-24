@@ -1,5 +1,5 @@
 const { XMLValidator } = require('fast-xml-parser');
-const { Op, fn, col } = require('sequelize');
+const { Op, fn, col, QueryTypes } = require('sequelize');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
 const {
   parsePayrollWorkbook,
@@ -257,6 +257,188 @@ function buildLabDominanceReport(rows, pxpTeacherByNumEmp = new Map()) {
     targetType: LAB_TYPE,
     totalDocentes: dominantRows.length,
     rows: dominantRows,
+  };
+}
+
+function normalizeCategoryKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
+}
+
+function toDecimal(value) {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+  const parsed = Number.parseFloat(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function containsTecnico(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .includes('TECNICO');
+}
+
+function splitCategoryCodes(rawValue) {
+  const text = String(rawValue || '').trim();
+  if (!text) {
+    return [];
+  }
+
+  const parts = text.split(/[^A-Za-z0-9]+/).map((token) => token.trim()).filter(Boolean);
+  if (!parts.length) {
+    return [text];
+  }
+
+  return Array.from(new Set(parts));
+}
+
+async function loadCategorySimpleMap() {
+  try {
+    const rows = await sequelize.query('SELECT CVE, CAT_SIMPLE FROM CATEG', {
+      type: QueryTypes.SELECT,
+    });
+
+    const byCve = new Map();
+    for (const row of rows || []) {
+      const cve = normalizeCategoryKey(row.CVE || row.cve);
+      if (!cve) {
+        continue;
+      }
+
+      if (!byCve.has(cve)) {
+        byCve.set(cve, String(row.CAT_SIMPLE || row.cat_simple || row.catSimple || '').trim());
+      }
+    }
+
+    return {
+      byCve,
+      sourceAvailable: true,
+      sourceError: null,
+    };
+  } catch (error) {
+    return {
+      byCve: new Map(),
+      sourceAvailable: false,
+      sourceError: error.message,
+    };
+  }
+}
+
+function buildTecnicosDocentesConCargaReport({
+  mxgRows,
+  pxpTeachers,
+  categorySimpleByCve,
+  categorySourceAvailable,
+  categorySourceError,
+}) {
+  const teacherByKey = new Map();
+  for (const teacher of pxpTeachers || []) {
+    const numEmp = normalizeNumEmpKey(teacher.numEmp);
+    const rfc = String(teacher.rfc || '').trim();
+    const nombre = String(teacher.nombre || '').trim();
+    const key = `${numEmp}|${rfc}|${nombre}`;
+    if (!teacherByKey.has(key)) {
+      teacherByKey.set(key, teacher);
+    }
+  }
+
+  const rowsByTeacher = new Map();
+  for (const row of mxgRows || []) {
+    const hrsFtg = toDecimal(row.hrsFtg);
+    const hrsNecesarias = toDecimal(row.hrsNecesarias);
+    if (hrsFtg === 0 && hrsNecesarias === 0) {
+      continue;
+    }
+
+    const numEmp = normalizeNumEmpKey(row.numEmp);
+    const rfc = String(row.rfc || '').trim();
+    const nombre = String(row.nombre || '').trim();
+    const key = `${numEmp}|${rfc}|${nombre}`;
+    const pxpTeacher = teacherByKey.get(key)
+      || teacherByKey.get(`${numEmp}|${rfc}|`)
+      || teacherByKey.get(`${numEmp}||${nombre}`)
+      || null;
+
+    if (!rowsByTeacher.has(key)) {
+      rowsByTeacher.set(key, {
+        numEmp: numEmp || null,
+        rfc: rfc || null,
+        nombre: String(row.nombre || pxpTeacher?.nombre || '').trim() || null,
+        dictamen: String(pxpTeacher?.dictamen || '').trim(),
+        plazaCodes: new Set(),
+        totalHrsFtg: 0,
+        totalHrsNecesarias: 0,
+      });
+    }
+
+    const current = rowsByTeacher.get(key);
+    current.totalHrsFtg += hrsFtg;
+    current.totalHrsNecesarias += hrsNecesarias;
+
+    for (const code of splitCategoryCodes(row.plaza)) {
+      current.plazaCodes.add(code);
+    }
+  }
+
+  const rows = [];
+  for (const item of rowsByTeacher.values()) {
+    const dictamenSimple = categorySimpleByCve.get(normalizeCategoryKey(item.dictamen)) || '';
+    const dictamenIsTecnico = containsTecnico(dictamenSimple);
+
+    const plazasInfo = Array.from(item.plazaCodes).map((code) => {
+      const catSimple = categorySimpleByCve.get(normalizeCategoryKey(code)) || '';
+      return {
+        code,
+        catSimple,
+        isTecnico: containsTecnico(catSimple),
+      };
+    });
+
+    const tecnicoPlazas = plazasInfo.filter((p) => p.isTecnico);
+    const plazasIsTecnico = tecnicoPlazas.length > 0;
+
+    if (!dictamenIsTecnico && !plazasIsTecnico) {
+      continue;
+    }
+
+    rows.push({
+      numEmp: item.numEmp,
+      rfc: item.rfc,
+      nombre: item.nombre,
+      categoriaDictaminada: item.dictamen || '-',
+      catSimpleDictamen: dictamenSimple || '-',
+      categoriaPlaza: Array.from(item.plazaCodes).join(', ') || '-',
+      catSimplePlaza: tecnicoPlazas.map((p) => `${p.code}: ${p.catSimple}`).join(' | ') || '-',
+      totalHrsFtg: Number(item.totalHrsFtg.toFixed(2)),
+      totalHrsNecesarias: Number(item.totalHrsNecesarias.toFixed(2)),
+      esTecnicoPorDictamen: dictamenIsTecnico,
+      esTecnicoPorPlaza: plazasIsTecnico,
+    });
+  }
+
+  rows.sort((a, b) => {
+    const cargaA = Math.abs(a.totalHrsFtg) + Math.abs(a.totalHrsNecesarias);
+    const cargaB = Math.abs(b.totalHrsFtg) + Math.abs(b.totalHrsNecesarias);
+    if (cargaB !== cargaA) {
+      return cargaB - cargaA;
+    }
+    return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+  });
+
+  return {
+    totalDocentes: rows.length,
+    totalHrsFtg: Number(rows.reduce((acc, row) => acc + row.totalHrsFtg, 0).toFixed(2)),
+    totalHrsNecesarias: Number(rows.reduce((acc, row) => acc + row.totalHrsNecesarias, 0).toFixed(2)),
+    categorySourceAvailable,
+    categorySourceError,
+    rows,
   };
 }
 
@@ -676,8 +858,10 @@ async function analistaAnalyticsPage(req, res) {
   let modalidadOptions = [];
   let carreraDescOptions = [];
   let labDominanceReport = null;
+  let tecnicoDocentesConCargaReport = null;
   let latestPxpUpload = null;
   let pxpTeacherByNumEmp = new Map();
+  let pxpTeacherRows = [];
   let hasSemNivelField = false;
   let hasAsigTipoField = false;
 
@@ -689,12 +873,12 @@ async function analistaAnalyticsPage(req, res) {
     latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
 
     if (latestPxpUpload) {
-      const pxpTeacherRows = await TeacherImport.findAll({
+      pxpTeacherRows = await TeacherImport.findAll({
         where: {
           uploadId: latestPxpUpload.id,
           ...(schoolWherePxp || {}),
         },
-        attributes: ['numEmp', 'rfc', 'nombre'],
+        attributes: ['numEmp', 'rfc', 'nombre', 'dictamen'],
         raw: true,
       });
       pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
@@ -788,6 +972,24 @@ async function analistaAnalyticsPage(req, res) {
         });
         labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance, pxpTeacherByNumEmp);
       }
+
+      const mxgRowsForTecnicosConCarga = await MxgScheduleImport.findAll({
+        where: {
+          uploadId: latestMxgUpload.id,
+          ...(schoolWhereMxg || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre', 'plaza', 'hrsFtg', 'hrsNecesarias'],
+        raw: true,
+      });
+
+      const categoryInfo = await loadCategorySimpleMap();
+      tecnicoDocentesConCargaReport = buildTecnicosDocentesConCargaReport({
+        mxgRows: mxgRowsForTecnicosConCarga,
+        pxpTeachers: pxpTeacherRows,
+        categorySimpleByCve: categoryInfo.byCve,
+        categorySourceAvailable: categoryInfo.sourceAvailable,
+        categorySourceError: categoryInfo.sourceError,
+      });
     }
 
     if (latestPxpUpload) {
@@ -836,6 +1038,7 @@ async function analistaAnalyticsPage(req, res) {
     escuelaHorasSolicitadas,
     hrsXCubHistogram,
     labDominanceReport,
+    tecnicoDocentesConCargaReport,
     semNivelOptions,
     academiaOptions,
     asigTipoOptions,
@@ -1649,7 +1852,9 @@ async function uploadAnalistaMxg(req, res) {
           numEmp: item.numEmp || null,
           rfc: item.rfc || null,
           nombre: item.nombre || null,
+          plaza: item.plaza || null,
           hrsAsig: item.hrsAsig,
+          hrsFtg: item.hrsFtg,
           hrsNecesarias: item.hrsNecesarias,
           needsAdditionalHours: item.needsAdditionalHours,
           lunes: item.lunes || null,

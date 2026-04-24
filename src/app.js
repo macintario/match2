@@ -193,6 +193,8 @@ async function ensureSchemaCompatibility() {
       const mxgNewCols = {
         semNivel: DataTypes.STRING(40),
         asigTipo: DataTypes.STRING(80),
+        plaza: DataTypes.STRING(80),
+        hrsFtg: DataTypes.DECIMAL(10, 2),
       };
       for (const [colName, colType] of Object.entries(mxgNewCols)) {
         if (!mxgColumns[colName]) {
