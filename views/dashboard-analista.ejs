@@ -7,11 +7,15 @@
       <div>
         <h1>Panel Analista</h1>
         <p>Funciones habilitadas para el perfil Analista.</p>
+        <p style="margin-top:0.35rem;">
+          <strong>Escuela activa:</strong>
+          <%= activeSchoolLabel || 'Sin seleccion' %>
+        </p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
         <a href="<%= basePath %>/analista/cargas" class="btn btn-primary">Ir a carga de archivos</a>
-        <a href="<%= basePath %>/analista/analitica" class="btn btn-secondary">Ir a analítica MXG</a>
-        <a href="<%= basePath %>/analista/propuestas" class="btn btn-secondary">Ir a propuestas de sustitución</a>
+        <a href="<%= basePath %>/analista/analitica<%= activeSchoolKey ? `?schoolKey=${encodeURIComponent(activeSchoolKey)}` : '' %>" class="btn btn-secondary">Ir a analítica MXG</a>
+        <a href="<%= basePath %>/analista/propuestas<%= activeSchoolKey ? `?schoolKey=${encodeURIComponent(activeSchoolKey)}` : '' %>" class="btn btn-secondary">Ir a propuestas de sustitución</a>
       </div>
     </div>
 

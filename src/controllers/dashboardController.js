@@ -260,6 +260,140 @@ function buildLabDominanceReport(rows, pxpTeacherByNumEmp = new Map()) {
   };
 }
 
+function normalizeSchoolPart(value) {
+  return String(value || '').trim();
+}
+
+function buildSchoolKey(plantelId, plantelDesc) {
+  const id = encodeURIComponent(normalizeSchoolPart(plantelId));
+  const desc = encodeURIComponent(normalizeSchoolPart(plantelDesc));
+  return `${id}|${desc}`;
+}
+
+function parseSchoolKey(schoolKey) {
+  const raw = String(schoolKey || '').trim();
+  if (!raw || !raw.includes('|')) {
+    return { plantelId: '', plantelDesc: '' };
+  }
+
+  const [idPart, ...descParts] = raw.split('|');
+  const descPart = descParts.join('|');
+  return {
+    plantelId: decodeURIComponent(idPart || ''),
+    plantelDesc: decodeURIComponent(descPart || ''),
+  };
+}
+
+function buildSchoolLabel(plantelId, plantelDesc) {
+  const id = normalizeSchoolPart(plantelId);
+  const desc = normalizeSchoolPart(plantelDesc);
+  return [id, desc].filter(Boolean).join(' - ');
+}
+
+function buildSchoolWhere(plantelId, plantelDesc, idField, descField) {
+  const id = normalizeSchoolPart(plantelId);
+  const desc = normalizeSchoolPart(plantelDesc);
+
+  if (id && idField && desc && descField) {
+    return {
+      [Op.or]: [
+        { [idField]: id },
+        { [descField]: desc },
+      ],
+    };
+  }
+
+  if (id && idField) {
+    return { [idField]: id };
+  }
+
+  if (desc && descField) {
+    return { [descField]: desc };
+  }
+
+  return null;
+}
+
+function buildSchoolOptionsFromRows(rows, idField, descField) {
+  const byKey = new Map();
+
+  for (const row of rows || []) {
+    const plantelId = normalizeSchoolPart(row[idField]);
+    const plantelDesc = normalizeSchoolPart(row[descField]);
+    if (!plantelId && !plantelDesc) {
+      continue;
+    }
+
+    const key = buildSchoolKey(plantelId, plantelDesc);
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        key,
+        label: buildSchoolLabel(plantelId, plantelDesc) || 'Escuela sin nombre',
+        plantelId,
+        plantelDesc,
+      });
+    }
+  }
+
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })
+  );
+}
+
+function resolveActiveSchool(req, schoolOptions) {
+  const requestedKey = String((req.query && req.query.schoolKey) || (req.body && req.body.schoolKey) || '').trim();
+  if (requestedKey) {
+    req.session.analistaActiveSchoolKey = requestedKey;
+  }
+
+  let activeSchoolKey = requestedKey || String(req.session.analistaActiveSchoolKey || '').trim();
+  if (!schoolOptions.some((item) => item.key === activeSchoolKey)) {
+    activeSchoolKey = schoolOptions[0]?.key || '';
+  }
+
+  if (activeSchoolKey) {
+    req.session.analistaActiveSchoolKey = activeSchoolKey;
+  }
+
+  const activeSchool = schoolOptions.find((item) => item.key === activeSchoolKey) || null;
+  return {
+    activeSchoolKey,
+    activeSchool,
+  };
+}
+
+async function getSchoolOptionsFromMxg() {
+  const rows = await MxgScheduleImport.findAll({
+    attributes: ['plantelId', 'plantelDesc'],
+    raw: true,
+  });
+
+  return buildSchoolOptionsFromRows(rows, 'plantelId', 'plantelDesc');
+}
+
+async function findLatestUploadForSchool(uploadType, model, schoolWhere) {
+  const uploads = await XmlUpload.findAll({
+    where: { uploadType },
+    order: [['uploadedAt', 'DESC']],
+    attributes: ['id', 'uploadedAt'],
+    raw: true,
+  });
+
+  for (const upload of uploads) {
+    const exists = await model.count({
+      where: {
+        uploadId: upload.id,
+        ...(schoolWhere || {}),
+      },
+    });
+    if (exists > 0) {
+      return upload;
+    }
+  }
+
+  return null;
+}
+
 function buildMxgHeatmap(rows) {
   const days = [
     { key: 'lunes', label: 'Lunes' },
@@ -391,6 +525,8 @@ function redirectByRole(req, res) {
 }
 
 async function analistaDashboard(req, res) {
+  const schoolOptions = await getSchoolOptionsFromMxg();
+  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
   const report = req.session.analistaXmlReport || null;
   const historicoReport = req.session.analistaHistoricoReport || null;
   const ruaaReport = req.session.analistaRuaaReport || null;
@@ -482,6 +618,9 @@ async function analistaDashboard(req, res) {
 
   return res.render('dashboard-analista', {
     title: 'Panel Analista',
+    schoolOptions,
+    activeSchoolKey,
+    activeSchoolLabel: activeSchool?.label || '',
     report,
     historicoReport,
     ruaaReport,
@@ -495,24 +634,19 @@ async function analistaDashboard(req, res) {
 }
 
 async function analistaAnalyticsPage(req, res) {
-  const latestMxgUpload = await XmlUpload.findOne({
-    where: { uploadType: 'MXG' },
-    order: [['uploadedAt', 'DESC']],
-    attributes: ['id'],
-  });
+  const schoolOptions = await getSchoolOptionsFromMxg();
+  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
 
-  let escuelaHorasSolicitadas = null;
+  let escuelaHorasSolicitadas = activeSchool?.label || null;
   let mxgHeatmap = null;
   let hrsXCubHistogram = [];
 
-  // Valores seleccionados en los filtros (pueden venir vacíos)
   const filterSemNivel = req.query.semNivel || '';
   const filterAcademia = req.query.academia || '';
   const filterAsigTipo = req.query.asigTipo || '';
   const filterModalidad = req.query.modalidad || '';
   const filterCarreraDesc = req.query.carreraDesc || '';
 
-  // Listas de valores únicos para los <select>
   let semNivelOptions = [];
   let academiaOptions = [];
   let asigTipoOptions = [];
@@ -524,133 +658,139 @@ async function analistaAnalyticsPage(req, res) {
   let hasSemNivelField = false;
   let hasAsigTipoField = false;
 
-  latestPxpUpload = await XmlUpload.findOne({
-    where: { uploadType: 'PXP' },
-    order: [['uploadedAt', 'DESC']],
-    attributes: ['id'],
-  });
+  if (activeSchool) {
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
 
-  if (latestPxpUpload) {
-    const pxpTeacherRows = await TeacherImport.findAll({
-      where: { uploadId: latestPxpUpload.id },
-      attributes: ['numEmp', 'rfc', 'nombre'],
-      raw: true,
-    });
-    pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
-  }
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
+    latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
 
-  if (latestMxgUpload) {
-    const queryInterface = sequelize.getQueryInterface();
-    const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
-    hasSemNivelField = Boolean(mxgTableColumns.semNivel);
-    hasAsigTipoField = Boolean(mxgTableColumns.asigTipo);
-
-    const anyMxgRow = await MxgScheduleImport.findOne({
-      where: { uploadId: latestMxgUpload.id },
-      attributes: ['plantelDesc', 'plantelId'],
-    });
-
-    if (anyMxgRow) {
-      const plantelId = anyMxgRow.get('plantelId');
-      const plantelDesc = anyMxgRow.get('plantelDesc');
-      escuelaHorasSolicitadas = [plantelId, plantelDesc].filter(Boolean).join(' - ') || null;
-    }
-
-    // Obtener valores únicos para los selectores de filtro solo con columnas disponibles.
-    const filterAttributes = ['academiaDesc', 'modalidad', 'carreraDesc'];
-    if (hasSemNivelField) {
-      filterAttributes.push('semNivel');
-    }
-    if (hasAsigTipoField) {
-      filterAttributes.push('asigTipo');
-    }
-
-    const mxgRowsForFilters = await MxgScheduleImport.findAll({
-      where: { uploadId: latestMxgUpload.id },
-      attributes: filterAttributes,
-      raw: true,
-    });
-
-    semNivelOptions = hasSemNivelField
-      ? Array.from(
-        new Set(mxgRowsForFilters.map((r) => String(r.semNivel || '').trim()).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
-      : [];
-
-    academiaOptions = Array.from(
-      new Set(mxgRowsForFilters.map((r) => String(r.academiaDesc || '').trim()).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-
-    asigTipoOptions = hasAsigTipoField
-      ? Array.from(
-        new Set(mxgRowsForFilters.map((r) => String(r.asigTipo || '').trim()).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
-      : [];
-
-    modalidadOptions = Array.from(
-      new Set(mxgRowsForFilters.map((r) => String(r.modalidad || '').trim()).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-
-    carreraDescOptions = Array.from(
-      new Set(mxgRowsForFilters.map((r) => String(r.carreraDesc || '').trim()).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-
-    // Construir cláusula WHERE con los filtros activos
-    const heatmapWhere = { uploadId: latestMxgUpload.id };
-    if (filterSemNivel && hasSemNivelField) heatmapWhere.semNivel = filterSemNivel;
-    if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
-    if (filterAsigTipo && hasAsigTipoField) heatmapWhere.asigTipo = filterAsigTipo;
-    if (filterModalidad) heatmapWhere.modalidad = filterModalidad;
-    if (filterCarreraDesc) heatmapWhere.carreraDesc = filterCarreraDesc;
-
-    const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
-      where: heatmapWhere,
-      attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
-    });
-
-    mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
-
-    if (hasAsigTipoField) {
-      const mxgRowsForLabDominance = await MxgScheduleImport.findAll({
-        where: { uploadId: latestMxgUpload.id },
-        attributes: ['numEmp', 'rfc', 'nombre', 'asigTipo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+    if (latestPxpUpload) {
+      const pxpTeacherRows = await TeacherImport.findAll({
+        where: {
+          uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre'],
         raw: true,
       });
-      labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance, pxpTeacherByNumEmp);
+      pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
     }
-  }
 
-  if (latestPxpUpload) {
-    const freqRows = await TeacherImport.findAll({
-      where: {
-        uploadId: latestPxpUpload.id,
-        hrsXCub: { [Op.regexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
-      },
-      attributes: [
-        [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'intervaloBase'],
-        [fn('COUNT', col('id')), 'cantidad'],
-      ],
-      group: [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2'))],
-      order: [[fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'ASC']],
-    });
+    if (latestMxgUpload) {
+      const queryInterface = sequelize.getQueryInterface();
+      const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
+      hasSemNivelField = Boolean(mxgTableColumns.semNivel);
+      hasAsigTipoField = Boolean(mxgTableColumns.asigTipo);
 
-    hrsXCubHistogram = freqRows.map((row) => {
-      const base = Number(row.get('intervaloBase')) * 2;
-      return {
-        valor: `${base} a ${base + 1}`,
-        base,
-        cantidad: Number(row.get('cantidad') || 0),
+      const filterAttributes = ['academiaDesc', 'modalidad', 'carreraDesc'];
+      if (hasSemNivelField) {
+        filterAttributes.push('semNivel');
+      }
+      if (hasAsigTipoField) {
+        filterAttributes.push('asigTipo');
+      }
+
+      const mxgRowsForFilters = await MxgScheduleImport.findAll({
+        where: {
+          uploadId: latestMxgUpload.id,
+          ...(schoolWhereMxg || {}),
+        },
+        attributes: filterAttributes,
+        raw: true,
+      });
+
+      semNivelOptions = hasSemNivelField
+        ? Array.from(
+          new Set(mxgRowsForFilters.map((r) => String(r.semNivel || '').trim()).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+        : [];
+
+      academiaOptions = Array.from(
+        new Set(mxgRowsForFilters.map((r) => String(r.academiaDesc || '').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+      asigTipoOptions = hasAsigTipoField
+        ? Array.from(
+          new Set(mxgRowsForFilters.map((r) => String(r.asigTipo || '').trim()).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+        : [];
+
+      modalidadOptions = Array.from(
+        new Set(mxgRowsForFilters.map((r) => String(r.modalidad || '').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+      carreraDescOptions = Array.from(
+        new Set(mxgRowsForFilters.map((r) => String(r.carreraDesc || '').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+      const heatmapWhere = {
+        uploadId: latestMxgUpload.id,
+        ...(schoolWhereMxg || {}),
       };
-    });
+      if (filterSemNivel && hasSemNivelField) heatmapWhere.semNivel = filterSemNivel;
+      if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
+      if (filterAsigTipo && hasAsigTipoField) heatmapWhere.asigTipo = filterAsigTipo;
+      if (filterModalidad) heatmapWhere.modalidad = filterModalidad;
+      if (filterCarreraDesc) heatmapWhere.carreraDesc = filterCarreraDesc;
 
-    const nonNumericCount = await TeacherImport.count({
-      where: {
+      const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
+        where: heatmapWhere,
+        attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+      });
+
+      mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
+
+      if (hasAsigTipoField) {
+        const mxgRowsForLabDominance = await MxgScheduleImport.findAll({
+          where: {
+            uploadId: latestMxgUpload.id,
+            ...(schoolWhereMxg || {}),
+          },
+          attributes: ['numEmp', 'rfc', 'nombre', 'asigTipo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+          raw: true,
+        });
+        labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance, pxpTeacherByNumEmp);
+      }
+    }
+
+    if (latestPxpUpload) {
+      const histogramWhere = {
         uploadId: latestPxpUpload.id,
-        hrsXCub: { [Op.notRegexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
-      },
-    });
-    if (nonNumericCount > 0) {
-      hrsXCubHistogram.push({ valor: '(sin valor)', base: null, cantidad: nonNumericCount });
+        ...(schoolWherePxp || {}),
+      };
+
+      const freqRows = await TeacherImport.findAll({
+        where: {
+          ...histogramWhere,
+          hrsXCub: { [Op.regexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
+        },
+        attributes: [
+          [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'intervaloBase'],
+          [fn('COUNT', col('id')), 'cantidad'],
+        ],
+        group: [fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2'))],
+        order: [[fn('FLOOR', sequelize.literal('CAST(`hrsXCub` AS SIGNED) / 2')), 'ASC']],
+      });
+
+      hrsXCubHistogram = freqRows.map((row) => {
+        const base = Number(row.get('intervaloBase')) * 2;
+        return {
+          valor: `${base} a ${base + 1}`,
+          base,
+          cantidad: Number(row.get('cantidad') || 0),
+        };
+      });
+
+      const nonNumericCount = await TeacherImport.count({
+        where: {
+          ...histogramWhere,
+          hrsXCub: { [Op.notRegexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
+        },
+      });
+      if (nonNumericCount > 0) {
+        hrsXCubHistogram.push({ valor: '(sin valor)', base: null, cantidad: nonNumericCount });
+      }
     }
   }
 
@@ -672,17 +812,32 @@ async function analistaAnalyticsPage(req, res) {
     filterCarreraDesc,
     hasSemNivelField,
     hasAsigTipoField,
+    schoolOptions,
+    activeSchoolKey,
+    activeSchoolLabel: activeSchool?.label || '',
   });
 }
 
 async function analistaProposalsPage(req, res) {
-  const proposalGenerationReport = req.session.proposalGenerationReport || null;
-  delete req.session.proposalGenerationReport;
+  const schoolOptions = await getSchoolOptionsFromMxg();
+  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
 
-  const recentProposals = await SubstitutionProposal.findAll({
-    order: [['createdAt', 'DESC']],
-    limit: 200,
-  });
+  let proposalGenerationReport = null;
+  const reportsBySchool = req.session.proposalGenerationReports || {};
+  if (activeSchoolKey && reportsBySchool[activeSchoolKey]) {
+    proposalGenerationReport = reportsBySchool[activeSchoolKey];
+    delete reportsBySchool[activeSchoolKey];
+    req.session.proposalGenerationReports = reportsBySchool;
+  }
+
+  let recentProposals = [];
+  if (activeSchoolKey) {
+    recentProposals = await SubstitutionProposal.findAll({
+      where: { schoolKey: activeSchoolKey },
+      order: [['createdAt', 'DESC']],
+      limit: 200,
+    });
+  }
 
   const proposalSummary = recentProposals.reduce(
     (acc, item) => {
@@ -720,23 +875,43 @@ async function analistaProposalsPage(req, res) {
     recentProposals,
     proposalSummary,
     proposalGenerationReport,
+    schoolOptions,
+    activeSchoolKey,
+    activeSchoolLabel: activeSchool?.label || '',
   });
 }
 
 async function generateAnalistaSubstitutionProposals(req, res) {
   try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada. Carga MXG y elige una escuela.');
+      return res.redirect('/analista/propuestas');
+    }
+
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+    const schoolWhereHistorico = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDescripcion');
+    const schoolWhereRuaa = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, null, 'plantel');
+
     const [latestMxgUpload, latestPxpUpload, latestHistoricoUpload, latestRuaaUpload] = await Promise.all([
-      XmlUpload.findOne({ where: { uploadType: 'MXG' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
-      XmlUpload.findOne({ where: { uploadType: 'PXP' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
-      XmlUpload.findOne({ where: { uploadType: 'HISTORICO' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
-      XmlUpload.findOne({ where: { uploadType: 'RUAA' }, order: [['uploadedAt', 'DESC']], attributes: ['id'] }),
+      findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg),
+      findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp),
+      findLatestUploadForSchool('HISTORICO', HistoricalSubjectImport, schoolWhereHistorico),
+      findLatestUploadForSchool('RUAA', RuaaScheduleImport, schoolWhereRuaa),
     ]);
 
     if (!latestMxgUpload || !latestPxpUpload || !latestHistoricoUpload || !latestRuaaUpload) {
+      const faltantes = [];
+      if (!latestMxgUpload) faltantes.push('MXG');
+      if (!latestPxpUpload) faltantes.push('PxP');
+      if (!latestHistoricoUpload) faltantes.push('HISTORICO');
+      if (!latestRuaaUpload) faltantes.push('RUAA');
       setFlash(
         req,
         'error',
-        'Para generar propuestas necesitas cargar primero MXG, PxP, HISTORICO y RUAA.'
+        `Para la escuela seleccionada (${activeSchool.label}), faltan cargas: ${faltantes.join(', ')}.`
       );
       return res.redirect('/analista/propuestas');
     }
@@ -745,6 +920,7 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       MxgScheduleImport.findAll({
         where: {
           uploadId: latestMxgUpload.id,
+          ...(schoolWhereMxg || {}),
           needsAdditionalHours: true,
           hrsNecesarias: { [Op.gt]: 0 },
         },
@@ -752,11 +928,22 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       TeacherImport.findAll({
         where: {
           uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
           hrsXCub: { [Op.regexp]: '^-?[0-9]+(\\.[0-9]+)?$' },
         },
       }),
-      HistoricalSubjectImport.findAll({ where: { uploadId: latestHistoricoUpload.id } }),
-      RuaaScheduleImport.findAll({ where: { uploadId: latestRuaaUpload.id } }),
+      HistoricalSubjectImport.findAll({
+        where: {
+          uploadId: latestHistoricoUpload.id,
+          ...(schoolWhereHistorico || {}),
+        },
+      }),
+      RuaaScheduleImport.findAll({
+        where: {
+          uploadId: latestRuaaUpload.id,
+          ...(schoolWhereRuaa || {}),
+        },
+      }),
     ]);
 
     const eligibleTeachers = teachers.filter((t) => Number(String(t.hrsXCub).replace(',', '.')) > 0);
@@ -775,10 +962,17 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       generatedByUserId: req.session.user.id,
     });
 
-    const proposals = generationResult.proposals;
+    const proposals = generationResult.proposals.map((proposal) => ({
+      ...proposal,
+      schoolKey: activeSchoolKey,
+      schoolLabel: activeSchool.label,
+    }));
 
     await sequelize.transaction(async (transaction) => {
-      await SubstitutionProposal.destroy({ where: {}, transaction });
+      await SubstitutionProposal.destroy({
+        where: { schoolKey: activeSchoolKey },
+        transaction,
+      });
 
       if (!proposals.length) {
         return;
@@ -811,14 +1005,16 @@ async function generateAnalistaSubstitutionProposals(req, res) {
       }
     );
 
-    req.session.proposalGenerationReport = {
+    const reportsBySchool = req.session.proposalGenerationReports || {};
+    reportsBySchool[activeSchoolKey] = {
       ...totals,
       teachersWithoutHistoricalReport: generationResult.teachersWithoutHistoricalReport,
     };
+    req.session.proposalGenerationReports = reportsBySchool;
     setFlash(
       req,
       'success',
-      `Propuestas generadas: ${totals.totalPropuestas} | Horas asignadas: ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno: ${totals.conflictosTurno} | Conflictos horario: ${totals.conflictosHorario} | Docentes PxP sin HISTORICO: ${generationResult.teachersWithoutHistoricalReport.totalTeachersWithoutHistorical}.`
+      `Escuela ${activeSchool.label}: propuestas generadas ${totals.totalPropuestas} | Horas asignadas ${totals.totalHorasAsignadas.toFixed(2)} | Conflictos turno ${totals.conflictosTurno} | Conflictos horario ${totals.conflictosHorario} | Docentes PxP sin HISTORICO ${generationResult.teachersWithoutHistoricalReport.totalTeachersWithoutHistorical}.`
     );
     return res.redirect('/analista/propuestas');
   } catch (error) {
@@ -829,6 +1025,12 @@ async function generateAnalistaSubstitutionProposals(req, res) {
 
 async function updateProposalStatus(req, res) {
   try {
+    const activeSchoolKey = String(req.session.analistaActiveSchoolKey || '').trim();
+    if (!activeSchoolKey) {
+      setFlash(req, 'error', 'Selecciona una escuela antes de actualizar propuestas.');
+      return res.redirect('/analista/propuestas');
+    }
+
     const proposalId = Number(req.params.id);
     const nextStatus = String(req.body.status || '').toUpperCase();
     const allowed = ['PENDIENTE', 'ACEPTADA', 'RECHAZADA'];
@@ -840,7 +1042,7 @@ async function updateProposalStatus(req, res) {
 
     const [updated] = await SubstitutionProposal.update(
       { proposalStatus: nextStatus },
-      { where: { id: proposalId } }
+      { where: { id: proposalId, schoolKey: activeSchoolKey } }
     );
 
     if (!updated) {
@@ -858,7 +1060,15 @@ async function updateProposalStatus(req, res) {
 
 async function exportSubstitutionProposalsCsv(req, res) {
   try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar propuestas.');
+      return res.redirect('/analista/propuestas');
+    }
+
     const rows = await SubstitutionProposal.findAll({
+      where: { schoolKey: activeSchoolKey },
       order: [['id', 'ASC']],
       limit: 20000,
     });
@@ -886,7 +1096,11 @@ async function exportSubstitutionProposalsCsv(req, res) {
       { key: 'createdAt', label: 'Fecha de creacion' },
     ];
 
-    const lines = [columns.map((col) => csvEscape(col.label)).join(',')];
+    const lines = [
+      `Escuela,${csvEscape(activeSchool.label)}`,
+      '',
+      columns.map((col) => csvEscape(col.label)).join(','),
+    ];
     for (const item of rows) {
       const values = columns.map((col) => csvEscape(item.get(col.key)));
       lines.push(values.join(','));
@@ -904,17 +1118,23 @@ async function exportSubstitutionProposalsCsv(req, res) {
 
 async function exportLabDominanceCsv(req, res) {
   try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar el reporte.');
+      return res.redirect('/analista/analitica');
+    }
+
     const filterSemNivel = req.query.semNivel || '';
     const filterAcademia = req.query.academia || '';
     const filterAsigTipo = req.query.asigTipo || '';
     const filterModalidad = req.query.modalidad || '';
     const filterCarreraDesc = req.query.carreraDesc || '';
 
-    const latestMxgUpload = await XmlUpload.findOne({
-      where: { uploadType: 'MXG' },
-      order: [['uploadedAt', 'DESC']],
-      attributes: ['id'],
-    });
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
 
     if (!latestMxgUpload) {
       setFlash(req, 'error', 'No hay carga MXG disponible para exportar.');
@@ -928,7 +1148,10 @@ async function exportLabDominanceCsv(req, res) {
       return res.redirect('/analista/analitica');
     }
 
-    const heatmapWhere = { uploadId: latestMxgUpload.id };
+    const heatmapWhere = {
+      uploadId: latestMxgUpload.id,
+      ...(schoolWhereMxg || {}),
+    };
     if (filterSemNivel && mxgTableColumns.semNivel) heatmapWhere.semNivel = filterSemNivel;
     if (filterAcademia) heatmapWhere.academiaDesc = filterAcademia;
     if (filterAsigTipo && mxgTableColumns.asigTipo) heatmapWhere.asigTipo = filterAsigTipo;
@@ -941,16 +1164,15 @@ async function exportLabDominanceCsv(req, res) {
       raw: true,
     });
 
-    const latestPxpUpload = await XmlUpload.findOne({
-      where: { uploadType: 'PXP' },
-      order: [['uploadedAt', 'DESC']],
-      attributes: ['id'],
-    });
+    const latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
 
     let pxpTeacherByNumEmp = new Map();
     if (latestPxpUpload) {
       const pxpTeacherRows = await TeacherImport.findAll({
-        where: { uploadId: latestPxpUpload.id },
+        where: {
+          uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
+        },
         attributes: ['numEmp', 'rfc', 'nombre'],
         raw: true,
       });
@@ -980,6 +1202,7 @@ async function exportLabDominanceCsv(req, res) {
 
     const lines = [
       'Campo,Valor',
+      `Escuela seleccionada,${csvEscape(activeSchool.label)}`,
       `Filtro Sem/Nivel,${csvEscape(appliedFilters.semNivel)}`,
       `Filtro academia,${csvEscape(appliedFilters.academia)}`,
       `Filtro tipo de asignatura,${csvEscape(appliedFilters.asigTipo)}`,
@@ -1046,8 +1269,6 @@ async function uploadAnalistaXml(req, res) {
       })();
 
     await sequelize.transaction(async (transaction) => {
-      await purgePreviousUploadByType('PXP', transaction);
-
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -1159,8 +1380,6 @@ async function uploadAnalistaHistoricoXml(req, res) {
       })();
 
     await sequelize.transaction(async (transaction) => {
-      await purgePreviousUploadByType('HISTORICO', transaction);
-
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -1243,8 +1462,6 @@ async function uploadAnalistaRuaaXml(req, res) {
       })();
 
     await sequelize.transaction(async (transaction) => {
-      await purgePreviousUploadByType('RUAA', transaction);
-
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,
@@ -1359,8 +1576,6 @@ async function uploadAnalistaMxg(req, res) {
     const mxg = parseMxgWorkbook(req.file.buffer);
 
     await sequelize.transaction(async (transaction) => {
-      await purgePreviousUploadByType('MXG', transaction);
-
       const upload = await XmlUpload.create(
         {
           userId: req.session.user.id,

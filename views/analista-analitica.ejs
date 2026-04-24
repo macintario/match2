@@ -10,8 +10,25 @@
       <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
     </div>
 
-    <% if (escuelaHorasSolicitadas) { %>
+    <form method="GET" action="<%= basePath %>/analista/analitica" style="margin:0.75rem 0 1rem 0; display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap;">
+      <div style="display:flex; flex-direction:column; gap:0.25rem;">
+        <label for="school-key" style="font-size:0.85rem; font-weight:600; color:#555;">Escuela de trabajo</label>
+        <select id="school-key" name="schoolKey" class="form-control" style="min-width:280px;">
+          <% if (!schoolOptions || schoolOptions.length === 0) { %>
+            <option value="">No hay escuelas disponibles</option>
+          <% } %>
+          <% (schoolOptions || []).forEach(function(opt) { %>
+            <option value="<%= opt.key %>" <%= activeSchoolKey === opt.key ? 'selected' : '' %>><%= opt.label %></option>
+          <% }) %>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Cambiar escuela</button>
+    </form>
+
+    <% if (activeSchoolLabel) { %>
       <p><strong>Escuela:</strong> <%= escuelaHorasSolicitadas %></p>
+    <% } else { %>
+      <p style="color:#8a6d3b;">Selecciona una escuela para consultar analitica y reportes.</p>
     <% } %>
 
     <h3>Histograma de Horas por Cubrir (hrsXCub) — PxP</h3>
@@ -110,6 +127,7 @@
 
       <%# Formulario de filtros %>
       <form method="GET" action="<%= basePath %>/analista/analitica" style="margin-bottom:1rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
+        <input type="hidden" name="schoolKey" value="<%= activeSchoolKey || '' %>" />
         <div style="display:flex; flex-direction:column; gap:0.25rem;">
           <label for="filter-semnivel" style="font-size:0.8rem; font-weight:600; color:#555;">Sem/Nivel</label>
           <select id="filter-semnivel" name="semNivel" class="form-control" style="min-width:120px;" <%= hasSemNivelField ? '' : 'disabled' %>>
@@ -166,7 +184,7 @@
 
         <button type="submit" class="btn btn-primary">Filtrar</button>
         <% if (filterSemNivel || filterAcademia || filterAsigTipo || filterModalidad || filterCarreraDesc) { %>
-          <a href="<%= basePath %>/analista/analitica" class="btn btn-secondary">Limpiar filtros</a>
+          <a href="<%= basePath %>/analista/analitica?schoolKey=<%= encodeURIComponent(activeSchoolKey || '') %>" class="btn btn-secondary">Limpiar filtros</a>
         <% } %>
       </form>
 
@@ -237,6 +255,7 @@
       <% } else { %>
         <p><strong>Total docentes:</strong> <%= labDominanceReport.totalDocentes %></p>
         <% const exportLabParams = []; %>
+        <% if (activeSchoolKey) exportLabParams.push(`schoolKey=${encodeURIComponent(activeSchoolKey)}`); %>
         <% if (filterSemNivel && hasSemNivelField) exportLabParams.push(`semNivel=${encodeURIComponent(filterSemNivel)}`); %>
         <% if (filterAcademia) exportLabParams.push(`academia=${encodeURIComponent(filterAcademia)}`); %>
         <% if (filterAsigTipo && hasAsigTipoField) exportLabParams.push(`asigTipo=${encodeURIComponent(filterAsigTipo)}`); %>

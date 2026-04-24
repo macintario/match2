@@ -29,6 +29,14 @@ const SubstitutionProposal = sequelize.define(
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: false,
     },
+    schoolKey: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+    schoolLabel: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
     mxgScheduleImportId: {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: false,

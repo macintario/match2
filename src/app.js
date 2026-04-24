@@ -206,12 +206,30 @@ async function ensureSchemaCompatibility() {
     }
 
     const proposalColumns = await queryInterface.describeTable('substitution_proposals').catch(() => null);
-    if (proposalColumns && !proposalColumns.proposalStatus) {
-      await queryInterface.addColumn('substitution_proposals', 'proposalStatus', {
-        type: DataTypes.ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA'),
-        allowNull: false,
-        defaultValue: 'PENDIENTE',
-      });
+    if (proposalColumns) {
+      if (!proposalColumns.proposalStatus) {
+        await queryInterface.addColumn('substitution_proposals', 'proposalStatus', {
+          type: DataTypes.ENUM('PENDIENTE', 'ACEPTADA', 'RECHAZADA'),
+          allowNull: false,
+          defaultValue: 'PENDIENTE',
+        });
+      }
+
+      if (!proposalColumns.schoolKey) {
+        await queryInterface.addColumn('substitution_proposals', 'schoolKey', {
+          type: DataTypes.STRING(220),
+          allowNull: true,
+          defaultValue: null,
+        });
+      }
+
+      if (!proposalColumns.schoolLabel) {
+        await queryInterface.addColumn('substitution_proposals', 'schoolLabel', {
+          type: DataTypes.STRING(255),
+          allowNull: true,
+          defaultValue: null,
+        });
+      }
     }
   } catch (error) {
     if (error.name !== 'SequelizeDatabaseError') {

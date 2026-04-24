@@ -7,10 +7,14 @@
       <div>
         <h1>Propuestas de Sustitucion</h1>
         <p>Generacion y seguimiento de propuestas para cubrir horas solicitadas en MXG.</p>
+        <% if (activeSchoolLabel) { %>
+          <p><strong>Escuela activa:</strong> <%= activeSchoolLabel %></p>
+        <% } %>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
         <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
         <form method="post" action="<%= basePath %>/analista/generar-propuestas" style="margin:0;" class="js-generate-proposals-form">
+          <input type="hidden" name="schoolKey" value="<%= activeSchoolKey || '' %>" />
           <button type="submit" class="btn btn-primary js-generate-proposals-submit">
             <span class="btn-label">Generar propuestas de sustitucion</span>
             <span class="btn-spinner" aria-hidden="true"></span>
@@ -18,6 +22,21 @@
         </form>
       </div>
     </div>
+
+    <form method="GET" action="<%= basePath %>/analista/propuestas" style="margin:0 0 1rem 0; display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap;">
+      <div style="display:flex; flex-direction:column; gap:0.25rem;">
+        <label for="proposals-school-key" style="font-size:0.85rem; font-weight:600; color:#555;">Escuela de trabajo</label>
+        <select id="proposals-school-key" name="schoolKey" class="form-control" style="min-width:280px;">
+          <% if (!schoolOptions || schoolOptions.length === 0) { %>
+            <option value="">No hay escuelas disponibles</option>
+          <% } %>
+          <% (schoolOptions || []).forEach(function(opt) { %>
+            <option value="<%= opt.key %>" <%= activeSchoolKey === opt.key ? 'selected' : '' %>><%= opt.label %></option>
+          <% }) %>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Cambiar escuela</button>
+    </form>
 
     <% if (proposalGenerationReport) { %>
       <div class="feature-item" style="margin-top:10px;">
@@ -71,7 +90,7 @@
 
     <h3>Propuestas de sustitucion (MXG vs docentes con hrsXCub &gt; 0)</h3>
     <div style="margin-bottom:10px;">
-      <a href="<%= basePath %>/analista/propuestas/export-csv" class="btn btn-secondary">Descargar propuestas CSV</a>
+      <a href="<%= basePath %>/analista/propuestas/export-csv?schoolKey=<%= encodeURIComponent(activeSchoolKey || '') %>" class="btn btn-secondary">Descargar propuestas CSV</a>
     </div>
 
     <div class="stats-grid">
