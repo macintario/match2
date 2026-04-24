@@ -314,6 +314,28 @@ function buildSchoolWhere(plantelId, plantelDesc, idField, descField) {
   return null;
 }
 
+function buildRuaaSchoolWhere(plantelId, plantelDesc) {
+  const id = normalizeSchoolPart(plantelId);
+  const desc = normalizeSchoolPart(plantelDesc);
+  const filters = [];
+
+  if (desc) {
+    filters.push({ plantel: desc });
+    filters.push({ plantel: { [Op.like]: `%${desc}%` } });
+  }
+
+  if (id) {
+    filters.push({ plantel: id });
+    filters.push({ plantel: { [Op.like]: `%${id}%` } });
+  }
+
+  if (!filters.length) {
+    return null;
+  }
+
+  return { [Op.or]: filters };
+}
+
 function buildSchoolOptionsFromRows(rows, idField, descField) {
   const byKey = new Map();
 
@@ -419,6 +441,7 @@ function buildMxgHeatmap(rows) {
       row.plantelId || 'N/A',
       row.carreraId || 'N/A',
       row.grupo || `ROW-${row.id}`,
+      row.asignaturaId || row.asignaturaDesc || `ASIG-ROW-${row.id}`,
     ].join('|');
 
     days.forEach((day, dayIndex) => {
@@ -736,7 +759,20 @@ async function analistaAnalyticsPage(req, res) {
 
       const mxgRowsForHeatmap = await MxgScheduleImport.findAll({
         where: heatmapWhere,
-        attributes: ['id', 'plantelId', 'carreraId', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+        attributes: [
+          'id',
+          'plantelId',
+          'carreraId',
+          'grupo',
+          'asignaturaId',
+          'asignaturaDesc',
+          'lunes',
+          'martes',
+          'miercoles',
+          'jueves',
+          'viernes',
+          'sabado',
+        ],
       });
 
       mxgHeatmap = buildMxgHeatmap(mxgRowsForHeatmap);
@@ -893,7 +929,7 @@ async function generateAnalistaSubstitutionProposals(req, res) {
     const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
     const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
     const schoolWhereHistorico = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDescripcion');
-    const schoolWhereRuaa = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, null, 'plantel');
+    const schoolWhereRuaa = buildRuaaSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc);
 
     const [latestMxgUpload, latestPxpUpload, latestHistoricoUpload, latestRuaaUpload] = await Promise.all([
       findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg),
