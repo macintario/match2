@@ -423,6 +423,70 @@ function generateSubstitutionProposals({
   };
 }
 
+function buildMxgRuaaOverlapReport(mxgRows, ruaaRows) {
+  const days = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+  const ruaaIndex = buildTeacherHorarioIndex(ruaaRows);
+  const conflictsByTeacher = new Map();
+
+  for (const mxgRow of mxgRows) {
+    const numEmp = String(mxgRow.numEmp || '').trim();
+    const rfc = String(mxgRow.rfc || '').trim();
+    if (!numEmp && !rfc) {
+      continue;
+    }
+
+    const teacherKey = `${numEmp}|${rfc}`;
+    const ruaaTeacher = ruaaIndex.get(teacherKey);
+    if (!ruaaTeacher) {
+      continue;
+    }
+
+    for (const day of days) {
+      const mxgRanges = parseDayRanges(mxgRow[day]);
+      if (!mxgRanges.length) {
+        continue;
+      }
+
+      const ruaaRanges = ruaaTeacher.dayRanges[day] || [];
+      if (!ruaaRanges.length) {
+        continue;
+      }
+
+      for (const mr of mxgRanges) {
+        for (const rr of ruaaRanges) {
+          if (rangesOverlap(mr, rr)) {
+            if (!conflictsByTeacher.has(teacherKey)) {
+              conflictsByTeacher.set(teacherKey, {
+                numEmp: numEmp || null,
+                rfc: rfc || null,
+                nombre: String(mxgRow.nombre || '').trim() || null,
+                conflicts: [],
+              });
+            }
+            conflictsByTeacher.get(teacherKey).conflicts.push({
+              asignaturaDesc: mxgRow.asignaturaDesc || null,
+              grupo: mxgRow.grupo || null,
+              day,
+              mxgRange: mr.raw,
+              ruaaRange: rr.raw,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const rows = Array.from(conflictsByTeacher.values()).sort((a, b) =>
+    String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
+  );
+
+  return {
+    totalTeachersWithConflicts: rows.length,
+    rows,
+  };
+}
+
 module.exports = {
   generateSubstitutionProposals,
+  buildMxgRuaaOverlapReport,
 };

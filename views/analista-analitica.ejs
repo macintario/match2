@@ -359,6 +359,55 @@
         </div>
       <% } %>
     <% } %>
+
+    <h3>Docentes en MxG con traslapes en RUAA</h3>
+    <% if (!mxgRuaaOverlapReport) { %>
+      <p>No hay datos disponibles. Carga MXG y RUAA para la escuela activa.</p>
+    <% } else if (mxgRuaaOverlapReport.totalTeachersWithConflicts === 0) { %>
+      <p style="color:#2d6a2d;">No se encontraron traslapes de horario entre los docentes de MXG y el archivo RUAA.</p>
+    <% } else { %>
+      <p>
+        <strong><%= mxgRuaaOverlapReport.totalTeachersWithConflicts %></strong>
+        docente(s) en MXG tienen traslapes de horario con clases registradas en RUAA.
+      </p>
+      <div style="margin-bottom:10px;">
+        <a href="<%= basePath %>/analista/analitica/export-mxg-ruaa-overlap-csv?schoolKey=<%= encodeURIComponent(activeSchoolKey || '') %>" class="btn btn-secondary">Descargar reporte CSV</a>
+      </div>
+      <div class="table-wrap" style="margin-bottom:1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Docente</th>
+              <th>Num. Emp</th>
+              <th>RFC</th>
+              <th>Asignatura MXG</th>
+              <th>Grupo</th>
+              <th>Dia</th>
+              <th>Horario MXG</th>
+              <th>Horario RUAA</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% mxgRuaaOverlapReport.rows.forEach(function(teacher) { %>
+              <% teacher.conflicts.forEach(function(conflict, idx) { %>
+                <tr>
+                  <% if (idx === 0) { %>
+                    <td rowspan="<%= teacher.conflicts.length %>"><%= teacher.nombre || '-' %></td>
+                    <td rowspan="<%= teacher.conflicts.length %>"><%= teacher.numEmp || '-' %></td>
+                    <td rowspan="<%= teacher.conflicts.length %>"><%= teacher.rfc || '-' %></td>
+                  <% } %>
+                  <td><%= conflict.asignaturaDesc || '-' %></td>
+                  <td><%= conflict.grupo || '-' %></td>
+                  <td><%= conflict.day %></td>
+                  <td><%= conflict.mxgRange || '-' %></td>
+                  <td><%= conflict.ruaaRange || '-' %></td>
+                </tr>
+              <% }) %>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
   </section>
 </main>
 
