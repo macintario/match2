@@ -1,22 +1,39 @@
-<header class="topbar">
-  <a href="<%= basePath %>/dashboard" class="brand">
+<aside class="sidebar" aria-label="Navegacion principal">
+  <a href="<%= basePath %>/dashboard" class="brand sidebar-brand">
     <img src="<%= basePath %>/logo.png" alt="Logo Match-2" class="brand-logo" />
     <span>Match-2</span>
   </a>
 
   <% if (currentUser) { %>
-    <nav class="topnav">
-      <span class="badge"><%= currentUser.role %></span>
-      <span class="username"><%= currentUser.name %></span>
+    <nav class="sidebar-nav">
+      <div class="sidebar-user">
+        <span class="badge"><%= currentUser.role %></span>
+        <span class="username"><%= currentUser.name %></span>
+      </div>
+
+      <a href="<%= basePath %>/dashboard" class="sidebar-link">Inicio</a>
       <% if (currentUser.role === 'admin') { %>
-        <a href="<%= basePath %>/admin/users">Usuarios</a>
+        <a href="<%= basePath %>/admin" class="sidebar-link">Panel Admin</a>
+        <a href="<%= basePath %>/admin/users" class="sidebar-link">Usuarios</a>
       <% } %>
-      <form action="<%= basePath %>/logout" method="POST" class="inline-form">
-        <button type="submit" class="btn btn-ghost">Cerrar sesión</button>
+
+      <% if (currentUser.role === 'analista') { %>
+        <a href="<%= basePath %>/analista" class="sidebar-link">Panel Analista</a>
+        <a href="<%= basePath %>/analista/cargas" class="sidebar-link">Cargas</a>
+        <a href="<%= basePath %>/analista/analitica" class="sidebar-link">Analitica MXG</a>
+        <a href="<%= basePath %>/analista/propuestas" class="sidebar-link">Propuestas</a>
+      <% } %>
+
+      <% if (currentUser.role === 'escuela') { %>
+        <a href="<%= basePath %>/escuela" class="sidebar-link">Panel Escuela</a>
+      <% } %>
+
+      <form action="<%= basePath %>/logout" method="POST" class="inline-form sidebar-logout">
+        <button type="submit" class="btn btn-ghost">Cerrar sesion</button>
       </form>
     </nav>
   <% } %>
-</header>
+</aside>
 
 <% if (flash) { %>
   <div class="alert alert-<%= flash.type %>"><%= flash.text %></div>
