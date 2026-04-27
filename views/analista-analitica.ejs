@@ -93,6 +93,70 @@
       </div>
     <% } %>
 
+    <% if (mxgNeedsHoursWithoutHistoricalMatchReport) { %>
+      <h3>Docentes con HRSNECESARIAS sin coincidencia en HIST</h3>
+      <p>
+        Se muestran registros de MXG con <strong>HRSNECESARIAS &gt; 0</strong> donde el docente no tiene
+        coincidencia en HIST por materia, ni por area (academia MXG vs carrera HIST).
+      </p>
+      <% if (!mxgNeedsHoursWithoutHistoricalMatchReport.hasHistoricalSource) { %>
+        <p style="color:#8a6d3b;">
+          No hay una carga HIST para la escuela activa. Por eso los registros se marcan sin coincidencia.
+        </p>
+      <% } %>
+      <p>
+        <strong>Registros evaluados:</strong> <%= mxgNeedsHoursWithoutHistoricalMatchReport.totalRegistrosEvaluados %>
+        | <strong>Docentes con HRSNECESARIAS:</strong> <%= mxgNeedsHoursWithoutHistoricalMatchReport.totalDocentesConHrsNecesarias %>
+        | <strong>Registros sin coincidencia:</strong> <%= mxgNeedsHoursWithoutHistoricalMatchReport.totalRegistrosSinCoincidenciaHist %>
+        | <strong>Docentes sin coincidencia:</strong> <%= mxgNeedsHoursWithoutHistoricalMatchReport.totalDocentesSinCoincidenciaHist %>
+      </p>
+
+      <div style="margin-bottom:10px;">
+        <a href="<%= basePath %>/analista/analitica/export-hrs-necesarias-sin-hist-csv?schoolKey=<%= encodeURIComponent(activeSchoolKey || '') %>" class="btn btn-secondary">Descargar reporte CSV</a>
+      </div>
+
+      <% if (!mxgNeedsHoursWithoutHistoricalMatchReport.rows || mxgNeedsHoursWithoutHistoricalMatchReport.rows.length === 0) { %>
+        <p style="color:#2d6a2d;">No se detectaron registros con HRSNECESARIAS sin coincidencia en HIST.</p>
+      <% } else { %>
+        <div class="table-wrap" style="margin-bottom:1rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Docente</th>
+                <th>Num. Emp</th>
+                <th>RFC</th>
+                <th>Grupo</th>
+                <th>Turno</th>
+                <th>Carrera</th>
+                <th>Materia MXG</th>
+                <th>Academia MXG</th>
+                <th>HRSNECESARIAS</th>
+                <th>Registros HIST del docente</th>
+                <th>Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% mxgNeedsHoursWithoutHistoricalMatchReport.rows.forEach(function(item) { %>
+                <tr>
+                  <td><%= item.docente || '-' %></td>
+                  <td><%= item.numEmp || '-' %></td>
+                  <td><%= item.rfc || '-' %></td>
+                  <td><%= item.grupo || '-' %></td>
+                  <td><%= item.turno || '-' %></td>
+                  <td><%= item.carreraDesc || '-' %></td>
+                  <td><%= item.asignaturaDesc || '-' %></td>
+                  <td><%= item.academiaDesc || '-' %></td>
+                  <td><%= Number(item.hrsNecesarias || 0).toFixed(2) %></td>
+                  <td><%= item.totalRegistrosHistDocente || 0 %></td>
+                  <td><%= item.motivo || '-' %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    <% } %>
+
     <h3>Histograma de Horas por Cubrir (hrsXCub) — PxP</h3>
     <% if (!hrsXCubHistogram || hrsXCubHistogram.length === 0) { %>
       <p>No hay datos de hrsXCub disponibles. Carga un archivo PxP primero.</p>

@@ -31,6 +31,7 @@ router.get('/analista', ensureAuth, requireRole(['analista']), dashboardControll
 router.get('/analista/analitica', ensureAuth, requireRole(['analista']), dashboardController.analistaAnalyticsPage);
 router.get('/analista/analitica/export-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportLabDominanceCsv);
 router.get('/analista/analitica/export-teoria-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportTheoryLabCoverageCsv);
+router.get('/analista/analitica/export-hrs-necesarias-sin-hist-csv', ensureAuth, requireRole(['analista']), dashboardController.exportMxgNeedsHoursWithoutHistCsv);
 router.get('/analista/analitica/export-mxg-ruaa-overlap-csv', ensureAuth, requireRole(['analista']), dashboardController.exportMxgRuaaOverlapCsv);
 router.get('/analista/propuestas', ensureAuth, requireRole(['analista']), dashboardController.analistaProposalsPage);
 router.get('/analista/cargas', ensureAuth, requireRole(['analista']), dashboardController.analistaUploadPage);

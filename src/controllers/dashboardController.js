@@ -153,6 +153,34 @@ function normalizeNumEmpKey(value) {
   return String(value || '').trim();
 }
 
+function normalizeNumEmpComparable(value) {
+  const normalized = normalizeNumEmpKey(value);
+  if (!normalized) {
+    return '';
+  }
+
+  if (!/^[0-9]+(?:\.0+)?$/.test(normalized)) {
+    return normalized;
+  }
+
+  const integerPart = normalized.replace(/\.0+$/, '');
+  const withoutLeadingZeros = integerPart.replace(/^0+/, '');
+  return withoutLeadingZeros || '0';
+}
+
+function getNumEmpLookupKeys(value) {
+  const direct = normalizeNumEmpKey(value);
+  const comparable = normalizeNumEmpComparable(value);
+  const keys = new Set();
+  if (direct) {
+    keys.add(direct);
+  }
+  if (comparable) {
+    keys.add(comparable);
+  }
+  return Array.from(keys);
+}
+
 function isValidNumEmp(value) {
   const normalized = normalizeNumEmpKey(value);
   if (!normalized) {
@@ -171,8 +199,13 @@ function buildPxpTeacherLookup(rows) {
       continue;
     }
 
-    if (!byNumEmp.has(numEmp)) {
-      byNumEmp.set(numEmp, {
+    const keys = getNumEmpLookupKeys(numEmp);
+    for (const key of keys) {
+      if (byNumEmp.has(key)) {
+        continue;
+      }
+
+      byNumEmp.set(key, {
         rfc: row.rfc || null,
         nombre: row.nombre || null,
       });
@@ -180,6 +213,17 @@ function buildPxpTeacherLookup(rows) {
   }
 
   return byNumEmp;
+}
+
+function findPxpTeacherByNumEmp(numEmp, pxpTeacherByNumEmp = new Map()) {
+  if (!isValidNumEmp(numEmp)) {
+    return null;
+  }
+
+  const lookupKeys = getNumEmpLookupKeys(numEmp);
+  return lookupKeys
+    .map((key) => pxpTeacherByNumEmp.get(key))
+    .find(Boolean) || null;
 }
 
 function buildLabDominanceReport(rows, pxpTeacherByNumEmp = new Map()) {
@@ -283,7 +327,7 @@ function normalizeSubjectBase(value) {
 
 function resolveMxgTeacherIdentity(row, pxpTeacherByNumEmp = new Map()) {
   const numEmp = normalizeNumEmpKey(row.numEmp);
-  const pxpTeacher = isValidNumEmp(numEmp) ? pxpTeacherByNumEmp.get(numEmp) : null;
+  const pxpTeacher = findPxpTeacherByNumEmp(numEmp, pxpTeacherByNumEmp);
   const rfc = String(pxpTeacher?.rfc || row.rfc || '').trim();
   const nombre = String(pxpTeacher?.nombre || row.nombre || '').trim();
 
@@ -446,6 +490,172 @@ function buildTheoryLabCoverageReport(rows, pxpTeacherByNumEmp = new Map()) {
     totalGruposLaboratorioSinTeoria: labWithoutTheoryRows.length,
     theoryTeacherMissingLabRows,
     labWithoutTheoryRows,
+  };
+}
+
+function toTokenSet(value) {
+  return new Set(normalizeText(value).split(' ').filter(Boolean));
+}
+
+function tokenSimilarity(a, b) {
+  const sa = toTokenSet(a);
+  const sb = toTokenSet(b);
+  if (!sa.size || !sb.size) {
+    return 0;
+  }
+
+  let inter = 0;
+  for (const token of sa) {
+    if (sb.has(token)) {
+      inter += 1;
+    }
+  }
+
+  const union = new Set([...sa, ...sb]).size;
+  return union ? inter / union : 0;
+}
+
+function hasSubjectMatch(mxgRow, historicalRow) {
+  const mxgAsigId = String(mxgRow.asignaturaId || '').trim();
+  const histAsigId = String(historicalRow.asignaturaId || '').trim();
+  if (mxgAsigId && histAsigId && mxgAsigId === histAsigId) {
+    return true;
+  }
+
+  const similarity = tokenSimilarity(mxgRow.asignaturaDesc, historicalRow.asignaturaDescripcion);
+  return similarity >= 0.52;
+}
+
+function hasAreaMatchByAcademia(mxgRow, historicalRow) {
+  const academia = normalizeText(mxgRow.academiaDesc);
+  const carrera = normalizeText(historicalRow.carreraDescripcion);
+  if (!academia || !carrera) {
+    return false;
+  }
+
+  if (academia.length >= 4 && (carrera.includes(academia) || academia.includes(carrera))) {
+    return true;
+  }
+
+  return tokenSimilarity(academia, carrera) >= 0.45;
+}
+
+function buildMxgNeedsHoursWithoutHistoricalMatchReport(
+  mxgRows,
+  historicalRows,
+  pxpTeacherByNumEmp = new Map(),
+  options = {}
+) {
+  const byNumEmp = new Map();
+  const byRfc = new Map();
+
+  for (const item of historicalRows || []) {
+    const numEmp = normalizeNumEmpKey(item.numEmp);
+    const rfc = String(item.rfc || '').trim().toUpperCase();
+
+    if (isValidNumEmp(numEmp)) {
+      if (!byNumEmp.has(numEmp)) {
+        byNumEmp.set(numEmp, []);
+      }
+      byNumEmp.get(numEmp).push(item);
+    }
+
+    if (rfc) {
+      if (!byRfc.has(rfc)) {
+        byRfc.set(rfc, []);
+      }
+      byRfc.get(rfc).push(item);
+    }
+  }
+
+  const rows = [];
+  const uniqueTeachers = new Set();
+
+  for (const mxgRow of mxgRows || []) {
+    const hrsNecesarias = toDecimal(mxgRow.hrsNecesarias);
+    if (hrsNecesarias <= 0) {
+      continue;
+    }
+
+    const identity = resolveMxgTeacherIdentity(mxgRow, pxpTeacherByNumEmp);
+    const pxpTeacher = findPxpTeacherByNumEmp(identity.numEmp, pxpTeacherByNumEmp);
+    const mustUsePxpName = isValidNumEmp(identity.numEmp);
+    const resolvedDisplayName = mustUsePxpName
+      ? (String(pxpTeacher?.nombre || '').trim() || 'SIN NOMBRE EN PXP')
+      : (identity.nombre || mxgRow.nombre || null);
+    const teacherKey = buildTeacherIdentityKey(identity);
+    uniqueTeachers.add(teacherKey);
+
+    const candidates = [];
+    const seen = new Set();
+    const numEmp = normalizeNumEmpKey(identity.numEmp);
+    const rfc = String(identity.rfc || '').trim().toUpperCase();
+
+    if (isValidNumEmp(numEmp)) {
+      for (const item of byNumEmp.get(numEmp) || []) {
+        const key = `${item.id || ''}|${item.asignaturaId || ''}|${item.carreraId || ''}|${item.cicloId || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          candidates.push(item);
+        }
+      }
+    }
+
+    if (rfc) {
+      for (const item of byRfc.get(rfc) || []) {
+        const key = `${item.id || ''}|${item.asignaturaId || ''}|${item.carreraId || ''}|${item.cicloId || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          candidates.push(item);
+        }
+      }
+    }
+
+    const subjectMatched = candidates.some((item) => hasSubjectMatch(mxgRow, item));
+    const areaMatched = candidates.some((item) => hasAreaMatchByAcademia(mxgRow, item));
+
+    if (subjectMatched || areaMatched) {
+      continue;
+    }
+
+    rows.push({
+      docente: resolvedDisplayName,
+      numEmp: identity.numEmp || null,
+      rfc: identity.rfc || null,
+      grupo: String(mxgRow.grupo || '').trim() || null,
+      turno: String(mxgRow.turno || '').trim() || null,
+      asignaturaId: String(mxgRow.asignaturaId || '').trim() || null,
+      asignaturaDesc: String(mxgRow.asignaturaDesc || '').trim() || null,
+      academiaDesc: String(mxgRow.academiaDesc || '').trim() || null,
+      carreraDesc: String(mxgRow.carreraDesc || '').trim() || null,
+      hrsNecesarias,
+      totalRegistrosHistDocente: candidates.length,
+      motivo: candidates.length === 0
+        ? 'El docente no tiene registros en HIST.'
+        : 'El docente tiene HIST, pero sin coincidencia de materia ni de area (academia MXG vs carrera HIST).',
+    });
+  }
+
+  rows.sort((a, b) => {
+    if (b.hrsNecesarias !== a.hrsNecesarias) {
+      return b.hrsNecesarias - a.hrsNecesarias;
+    }
+
+    const teacherCompare = String(a.docente || '').localeCompare(String(b.docente || ''), 'es', { sensitivity: 'base' });
+    if (teacherCompare !== 0) {
+      return teacherCompare;
+    }
+
+    return String(a.asignaturaDesc || '').localeCompare(String(b.asignaturaDesc || ''), 'es', { sensitivity: 'base' });
+  });
+
+  return {
+    hasHistoricalSource: Boolean(options.hasHistoricalSource),
+    totalRegistrosEvaluados: (mxgRows || []).filter((item) => toDecimal(item.hrsNecesarias) > 0).length,
+    totalDocentesConHrsNecesarias: uniqueTeachers.size,
+    totalRegistrosSinCoincidenciaHist: rows.length,
+    totalDocentesSinCoincidenciaHist: new Set(rows.map((item) => buildTeacherIdentityKey(item))).size,
+    rows,
   };
 }
 
@@ -1048,6 +1258,7 @@ async function analistaAnalyticsPage(req, res) {
   let carreraDescOptions = [];
   let labDominanceReport = null;
   let theoryLabCoverageReport = null;
+  let mxgNeedsHoursWithoutHistoricalMatchReport = null;
   let tecnicoDocentesConCargaReport = null;
   let mxgRuaaOverlapReport = null;
   let latestPxpUpload = null;
@@ -1059,6 +1270,7 @@ async function analistaAnalyticsPage(req, res) {
   if (activeSchool) {
     const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
     const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+    const schoolWhereHistorico = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDescripcion');
 
     const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
     latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
@@ -1207,6 +1419,48 @@ async function analistaAnalyticsPage(req, res) {
         categorySourceError: categoryInfo.sourceError,
       });
 
+      const latestHistoricoUpload = await findLatestUploadForSchool('HISTORICO', HistoricalSubjectImport, schoolWhereHistorico);
+      const [mxgRowsForNeedsVsHist, historicalRowsForNeedsVsHist] = await Promise.all([
+        MxgScheduleImport.findAll({
+          where: {
+            uploadId: latestMxgUpload.id,
+            ...(schoolWhereMxg || {}),
+            needsAdditionalHours: true,
+            hrsNecesarias: { [Op.gt]: 0 },
+          },
+          attributes: [
+            'numEmp',
+            'rfc',
+            'nombre',
+            'grupo',
+            'turno',
+            'asignaturaId',
+            'asignaturaDesc',
+            'academiaDesc',
+            'carreraDesc',
+            'hrsNecesarias',
+          ],
+          raw: true,
+        }),
+        latestHistoricoUpload
+          ? HistoricalSubjectImport.findAll({
+            where: {
+              uploadId: latestHistoricoUpload.id,
+              ...(schoolWhereHistorico || {}),
+            },
+            attributes: ['id', 'numEmp', 'rfc', 'asignaturaId', 'asignaturaDescripcion', 'carreraDescripcion', 'carreraId', 'cicloId'],
+            raw: true,
+          })
+          : Promise.resolve([]),
+      ]);
+
+      mxgNeedsHoursWithoutHistoricalMatchReport = buildMxgNeedsHoursWithoutHistoricalMatchReport(
+        mxgRowsForNeedsVsHist,
+        historicalRowsForNeedsVsHist,
+        pxpTeacherByNumEmp,
+        { hasHistoricalSource: Boolean(latestHistoricoUpload) }
+      );
+
       const schoolWhereRuaa = buildRuaaSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc);
       const latestRuaaUpload = await findLatestUploadForSchool('RUAA', RuaaScheduleImport, schoolWhereRuaa);
       if (latestRuaaUpload) {
@@ -1279,6 +1533,7 @@ async function analistaAnalyticsPage(req, res) {
     hrsXCubHistogram,
     labDominanceReport,
     theoryLabCoverageReport,
+    mxgNeedsHoursWithoutHistoricalMatchReport,
     tecnicoDocentesConCargaReport,
     mxgRuaaOverlapReport,
     semNivelOptions,
@@ -1838,6 +2093,120 @@ async function exportTheoryLabCoverageCsv(req, res) {
   }
 }
 
+async function exportMxgNeedsHoursWithoutHistCsv(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar el reporte.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+    const schoolWhereHistorico = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDescripcion');
+
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
+    if (!latestMxgUpload) {
+      setFlash(req, 'error', 'No hay carga MXG disponible para exportar.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
+    const latestHistoricoUpload = await findLatestUploadForSchool('HISTORICO', HistoricalSubjectImport, schoolWhereHistorico);
+
+    let pxpTeacherByNumEmp = new Map();
+    if (latestPxpUpload) {
+      const pxpTeacherRows = await TeacherImport.findAll({
+        where: {
+          uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre'],
+        raw: true,
+      });
+      pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
+    }
+
+    const [mxgRowsForNeedsVsHist, historicalRowsForNeedsVsHist] = await Promise.all([
+      MxgScheduleImport.findAll({
+        where: {
+          uploadId: latestMxgUpload.id,
+          ...(schoolWhereMxg || {}),
+          needsAdditionalHours: true,
+          hrsNecesarias: { [Op.gt]: 0 },
+        },
+        attributes: [
+          'numEmp',
+          'rfc',
+          'nombre',
+          'grupo',
+          'turno',
+          'asignaturaId',
+          'asignaturaDesc',
+          'academiaDesc',
+          'carreraDesc',
+          'hrsNecesarias',
+        ],
+        raw: true,
+      }),
+      latestHistoricoUpload
+        ? HistoricalSubjectImport.findAll({
+          where: {
+            uploadId: latestHistoricoUpload.id,
+            ...(schoolWhereHistorico || {}),
+          },
+          attributes: ['id', 'numEmp', 'rfc', 'asignaturaId', 'asignaturaDescripcion', 'carreraDescripcion', 'carreraId', 'cicloId'],
+          raw: true,
+        })
+        : Promise.resolve([]),
+    ]);
+
+    const report = buildMxgNeedsHoursWithoutHistoricalMatchReport(
+      mxgRowsForNeedsVsHist,
+      historicalRowsForNeedsVsHist,
+      pxpTeacherByNumEmp,
+      { hasHistoricalSource: Boolean(latestHistoricoUpload) }
+    );
+
+    const lines = [
+      'Campo,Valor',
+      `Escuela seleccionada,${csvEscape(activeSchool.label)}`,
+      `Existe carga HIST para la escuela,${csvEscape(report.hasHistoricalSource ? 'SI' : 'NO')}`,
+      `Registros MXG evaluados (HRSNECESARIAS > 0),${csvEscape(report.totalRegistrosEvaluados)}`,
+      `Docentes con HRSNECESARIAS,${csvEscape(report.totalDocentesConHrsNecesarias)}`,
+      `Registros sin coincidencia en HIST,${csvEscape(report.totalRegistrosSinCoincidenciaHist)}`,
+      `Docentes sin coincidencia en HIST,${csvEscape(report.totalDocentesSinCoincidenciaHist)}`,
+      '',
+      'Docente,Numero de empleado,RFC,Grupo,Turno,Carrera,Materia MXG,Academia MXG,HRSNECESARIAS,Registros HIST del docente,Motivo',
+    ];
+
+    for (const item of report.rows) {
+      lines.push([
+        csvEscape(item.docente || ''),
+        csvEscape(item.numEmp || ''),
+        csvEscape(item.rfc || ''),
+        csvEscape(item.grupo || ''),
+        csvEscape(item.turno || ''),
+        csvEscape(item.carreraDesc || ''),
+        csvEscape(item.asignaturaDesc || ''),
+        csvEscape(item.academiaDesc || ''),
+        csvEscape(Number(item.hrsNecesarias || 0).toFixed(2)),
+        csvEscape(item.totalRegistrosHistDocente || 0),
+        csvEscape(item.motivo || ''),
+      ].join(','));
+    }
+
+    const fileName = `hrs_necesarias_sin_hist_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV de HRSNECESARIAS sin HIST: ${error.message}`);
+    return res.redirect('/analista/analitica');
+  }
+}
+
 async function exportMxgRuaaOverlapCsv(req, res) {
   try {
     const schoolOptions = await getSchoolOptionsFromMxg();
@@ -2358,6 +2727,7 @@ module.exports = {
   exportSubstitutionProposalsCsv,
   exportLabDominanceCsv,
   exportTheoryLabCoverageCsv,
+  exportMxgNeedsHoursWithoutHistCsv,
   exportMxgRuaaOverlapCsv,
   escuelaDashboard,
 };
