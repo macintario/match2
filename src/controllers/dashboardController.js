@@ -7,7 +7,10 @@ const {
   parseRuaaWorkbook,
 } = require('../services/payrollWorkbookParser');
 const { parseMxgWorkbook } = require('../services/mxgParser');
-const { generateSubstitutionProposals } = require('../services/substitutionProposalService');
+const {
+  generateSubstitutionProposals,
+  buildMxgRuaaOverlapReport,
+} = require('../services/substitutionProposalService');
 const {
   XmlUpload,
   TeacherImport,
@@ -859,6 +862,7 @@ async function analistaAnalyticsPage(req, res) {
   let carreraDescOptions = [];
   let labDominanceReport = null;
   let tecnicoDocentesConCargaReport = null;
+  let mxgRuaaOverlapReport = null;
   let latestPxpUpload = null;
   let pxpTeacherByNumEmp = new Map();
   let pxpTeacherRows = [];
@@ -990,6 +994,30 @@ async function analistaAnalyticsPage(req, res) {
         categorySourceAvailable: categoryInfo.sourceAvailable,
         categorySourceError: categoryInfo.sourceError,
       });
+
+      const schoolWhereRuaa = buildRuaaSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc);
+      const latestRuaaUpload = await findLatestUploadForSchool('RUAA', RuaaScheduleImport, schoolWhereRuaa);
+      if (latestRuaaUpload) {
+        const [mxgRowsForOverlap, ruaaRowsForOverlap] = await Promise.all([
+          MxgScheduleImport.findAll({
+            where: {
+              uploadId: latestMxgUpload.id,
+              ...(schoolWhereMxg || {}),
+            },
+            attributes: ['numEmp', 'rfc', 'nombre', 'asignaturaDesc', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+            raw: true,
+          }),
+          RuaaScheduleImport.findAll({
+            where: {
+              uploadId: latestRuaaUpload.id,
+              ...(schoolWhereRuaa || {}),
+            },
+            attributes: ['numEmp', 'rfc', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'],
+            raw: true,
+          }),
+        ]);
+        mxgRuaaOverlapReport = buildMxgRuaaOverlapReport(mxgRowsForOverlap, ruaaRowsForOverlap);
+      }
     }
 
     if (latestPxpUpload) {
@@ -1039,6 +1067,7 @@ async function analistaAnalyticsPage(req, res) {
     hrsXCubHistogram,
     labDominanceReport,
     tecnicoDocentesConCargaReport,
+    mxgRuaaOverlapReport,
     semNivelOptions,
     academiaOptions,
     asigTipoOptions,
@@ -1478,6 +1507,94 @@ async function exportLabDominanceCsv(req, res) {
   }
 }
 
+async function exportMxgRuaaOverlapCsv(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar el reporte.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWhereRuaa = buildRuaaSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc);
+
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
+    const latestRuaaUpload = await findLatestUploadForSchool('RUAA', RuaaScheduleImport, schoolWhereRuaa);
+
+    if (!latestMxgUpload || !latestRuaaUpload) {
+      const faltantes = [];
+      if (!latestMxgUpload) faltantes.push('MXG');
+      if (!latestRuaaUpload) faltantes.push('RUAA');
+      setFlash(req, 'error', `Faltan cargas para generar el reporte: ${faltantes.join(', ')}.`);
+      return res.redirect('/analista/analitica');
+    }
+
+    const [mxgRowsForOverlap, ruaaRowsForOverlap] = await Promise.all([
+      MxgScheduleImport.findAll({
+        where: {
+          uploadId: latestMxgUpload.id,
+          ...(schoolWhereMxg || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre', 'asignaturaDesc', 'grupo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'],
+        raw: true,
+      }),
+      RuaaScheduleImport.findAll({
+        where: {
+          uploadId: latestRuaaUpload.id,
+          ...(schoolWhereRuaa || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'],
+        raw: true,
+      }),
+    ]);
+
+    const report = buildMxgRuaaOverlapReport(mxgRowsForOverlap, ruaaRowsForOverlap);
+
+    const columns = [
+      { key: 'numEmp', label: 'Numero de empleado' },
+      { key: 'rfc', label: 'RFC' },
+      { key: 'nombre', label: 'Nombre del docente' },
+      { key: 'asignaturaDesc', label: 'Asignatura MXG' },
+      { key: 'grupo', label: 'Grupo MXG' },
+      { key: 'day', label: 'Dia' },
+      { key: 'mxgRange', label: 'Horario MXG' },
+      { key: 'ruaaRange', label: 'Horario RUAA' },
+    ];
+
+    const lines = [
+      `Escuela,${csvEscape(activeSchool.label)}`,
+      `Docentes con traslapes,${report.totalTeachersWithConflicts}`,
+      '',
+      columns.map((col) => csvEscape(col.label)).join(','),
+    ];
+
+    for (const teacher of report.rows) {
+      for (const conflict of teacher.conflicts) {
+        const rowData = {
+          numEmp: teacher.numEmp || '',
+          rfc: teacher.rfc || '',
+          nombre: teacher.nombre || '',
+          asignaturaDesc: conflict.asignaturaDesc || '',
+          grupo: conflict.grupo || '',
+          day: conflict.day || '',
+          mxgRange: conflict.mxgRange || '',
+          ruaaRange: conflict.ruaaRange || '',
+        };
+        lines.push(columns.map((col) => csvEscape(rowData[col.key])).join(','));
+      }
+    }
+
+    const fileName = `traslapes_mxg_ruaa_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV de traslapes MXG-RUAA: ${error.message}`);
+    return res.redirect('/analista/analitica');
+  }
+}
+
 function analistaUploadPage(req, res) {
   return res.render('analista-cargas', {
     title: 'Carga de Archivos',
@@ -1909,5 +2026,6 @@ module.exports = {
   updateProposalStatus,
   exportSubstitutionProposalsCsv,
   exportLabDominanceCsv,
+  exportMxgRuaaOverlapCsv,
   escuelaDashboard,
 };
