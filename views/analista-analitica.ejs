@@ -360,6 +360,98 @@
       <% } %>
     <% } %>
 
+    <% if (theoryLabCoverageReport) { %>
+      <h3>Validacion T-TEORIA vs L-LABORATORIO por grupo-materia</h3>
+      <p>
+        Se reportan: 1) docentes que imparten <strong>T-TEORIA</strong> pero no estan en
+        <strong>L-LABORATORIO</strong> del mismo grupo-materia, y 2) grupos-materia con
+        <strong>L-LABORATORIO</strong> sin ningun docente en <strong>T-TEORIA</strong>.
+      </p>
+      <p>
+        <strong>Pares evaluados:</strong> <%= theoryLabCoverageReport.totalParesEvaluados %>
+        | <strong>Docentes T sin L:</strong> <%= theoryLabCoverageReport.totalDocentesTeoriaSinLaboratorio %>
+        | <strong>Grupos con L sin T:</strong> <%= theoryLabCoverageReport.totalGruposLaboratorioSinTeoria %>
+      </p>
+
+      <div style="margin-bottom:10px;">
+        <a href="<%= basePath %>/analista/analitica/export-teoria-laboratorio-csv?schoolKey=<%= encodeURIComponent(activeSchoolKey || '') %>" class="btn btn-secondary">Descargar reporte CSV</a>
+      </div>
+
+      <h4>Docentes de T-TEORIA que no aparecen en L-LABORATORIO</h4>
+      <% if (!theoryLabCoverageReport.theoryTeacherMissingLabRows || theoryLabCoverageReport.theoryTeacherMissingLabRows.length === 0) { %>
+        <p style="color:#2d6a2d;">No se detectaron docentes de T-TEORIA faltantes en L-LABORATORIO.</p>
+      <% } else { %>
+        <div class="table-wrap" style="margin-bottom:1rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Docente</th>
+                <th>Num. Emp</th>
+                <th>RFC</th>
+                <th>Grupo</th>
+                <th>Turno</th>
+                <th>Carrera</th>
+                <th>Materia base</th>
+                <th>Asignatura(s) T</th>
+                <th>Asignatura(s) L</th>
+                <th>Docente(s) en L</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% theoryLabCoverageReport.theoryTeacherMissingLabRows.forEach(function(item) { %>
+                <tr>
+                  <td><%= item.docente || '-' %></td>
+                  <td><%= item.numEmp || '-' %></td>
+                  <td><%= item.rfc || '-' %></td>
+                  <td><%= item.grupo || '-' %></td>
+                  <td><%= item.turno || '-' %></td>
+                  <td><%= item.carrera || '-' %></td>
+                  <td><%= item.asignaturaBase || '-' %></td>
+                  <td><%= item.asignaturasTeoria || '-' %></td>
+                  <td><%= item.asignaturasLaboratorio || '-' %></td>
+                  <td><%= item.docentesLaboratorio || '-' %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+
+      <h4>Grupos-materia con L-LABORATORIO y sin T-TEORIA</h4>
+      <% if (!theoryLabCoverageReport.labWithoutTheoryRows || theoryLabCoverageReport.labWithoutTheoryRows.length === 0) { %>
+        <p style="color:#2d6a2d;">No se detectaron grupos con L-LABORATORIO sin T-TEORIA.</p>
+      <% } else { %>
+        <div class="table-wrap" style="margin-bottom:1rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Turno</th>
+                <th>Carrera</th>
+                <th>Materia base</th>
+                <th>Asignatura(s) L</th>
+                <th>Docente(s) en L</th>
+                <th>Total docentes en L</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% theoryLabCoverageReport.labWithoutTheoryRows.forEach(function(item) { %>
+                <tr>
+                  <td><%= item.grupo || '-' %></td>
+                  <td><%= item.turno || '-' %></td>
+                  <td><%= item.carrera || '-' %></td>
+                  <td><%= item.asignaturaBase || '-' %></td>
+                  <td><%= item.asignaturasLaboratorio || '-' %></td>
+                  <td><%= item.docentesLaboratorio || '-' %></td>
+                  <td><%= item.totalDocentesLaboratorio || 0 %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    <% } %>
+
     <h3>Docentes en MxG con traslapes en RUAA</h3>
     <% if (!mxgRuaaOverlapReport) { %>
       <p>No hay datos disponibles. Carga MXG y RUAA para la escuela activa.</p>

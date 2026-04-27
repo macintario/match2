@@ -116,6 +116,16 @@ function parseMxgDayRanges(value) {
   return ranges;
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeAsigTipoValue(value) {
   return String(value || '')
     .normalize('NFD')
@@ -260,6 +270,182 @@ function buildLabDominanceReport(rows, pxpTeacherByNumEmp = new Map()) {
     targetType: LAB_TYPE,
     totalDocentes: dominantRows.length,
     rows: dominantRows,
+  };
+}
+
+function normalizeSubjectBase(value) {
+  return normalizeText(value)
+    .replace(/\b(laboratorio|laboratorios|lab)\b/g, ' ')
+    .replace(/\b(teoria|teorico|teorica|teoricas|teoricos)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveMxgTeacherIdentity(row, pxpTeacherByNumEmp = new Map()) {
+  const numEmp = normalizeNumEmpKey(row.numEmp);
+  const pxpTeacher = isValidNumEmp(numEmp) ? pxpTeacherByNumEmp.get(numEmp) : null;
+  const rfc = String(pxpTeacher?.rfc || row.rfc || '').trim();
+  const nombre = String(pxpTeacher?.nombre || row.nombre || '').trim();
+
+  return {
+    numEmp,
+    rfc,
+    nombre,
+  };
+}
+
+function buildTeacherIdentityKey(identity) {
+  return [
+    normalizeNumEmpKey(identity.numEmp),
+    String(identity.rfc || '').trim().toUpperCase(),
+    String(identity.nombre || '').trim().toUpperCase(),
+  ].join('|');
+}
+
+function detectMxgTheoryLabRole(row) {
+  const asigTipo = normalizeAsigTipoValue(row.asigTipo);
+  if (asigTipo.includes('LABORATORIO') || asigTipo === 'L') {
+    return 'LAB';
+  }
+  if (asigTipo.includes('TEORIA') || asigTipo === 'T') {
+    return 'THEORY';
+  }
+
+  const desc = normalizeText(row.asignaturaDesc);
+  if (desc.includes('laboratorio')) {
+    return 'LAB';
+  }
+  if (desc.includes('teoria')) {
+    return 'THEORY';
+  }
+
+  return null;
+}
+
+function buildTheoryLabCoverageReport(rows, pxpTeacherByNumEmp = new Map()) {
+  const byCourse = new Map();
+
+  for (const row of rows || []) {
+    const role = detectMxgTheoryLabRole(row);
+    if (!role) {
+      continue;
+    }
+
+    const subjectBase = normalizeSubjectBase(row.asignaturaDesc);
+    if (!subjectBase) {
+      continue;
+    }
+
+    const courseKey = [
+      normalizeSchoolPart(row.plantelId),
+      String(row.cicloId || '').trim(),
+      String(row.carreraId || '').trim(),
+      String(row.planEstudio || '').trim(),
+      String(row.turno || '').trim(),
+      String(row.grupo || '').trim(),
+      subjectBase,
+    ].join('|');
+
+    if (!byCourse.has(courseKey)) {
+      byCourse.set(courseKey, {
+        plantelId: normalizeSchoolPart(row.plantelId) || null,
+        plantelDesc: String(row.plantelDesc || '').trim() || null,
+        cicloId: String(row.cicloId || '').trim() || null,
+        carreraId: String(row.carreraId || '').trim() || null,
+        carreraDesc: String(row.carreraDesc || '').trim() || null,
+        planEstudio: String(row.planEstudio || '').trim() || null,
+        turno: String(row.turno || '').trim() || null,
+        grupo: String(row.grupo || '').trim() || null,
+        subjectBase,
+        theorySubjectNames: new Set(),
+        labSubjectNames: new Set(),
+        theoryTeachers: new Map(),
+        labTeachers: new Map(),
+      });
+    }
+
+    const course = byCourse.get(courseKey);
+    const identity = resolveMxgTeacherIdentity(row, pxpTeacherByNumEmp);
+    const identityKey = buildTeacherIdentityKey(identity);
+
+    if (role === 'THEORY') {
+      course.theorySubjectNames.add(String(row.asignaturaDesc || '').trim());
+      course.theoryTeachers.set(identityKey, identity);
+    }
+
+    if (role === 'LAB') {
+      course.labSubjectNames.add(String(row.asignaturaDesc || '').trim());
+      course.labTeachers.set(identityKey, identity);
+    }
+  }
+
+  const theoryTeacherMissingLabRows = [];
+  const labWithoutTheoryRows = [];
+
+  for (const course of byCourse.values()) {
+    const theoryCount = course.theoryTeachers.size;
+    const labCount = course.labTeachers.size;
+
+    if (theoryCount > 0 && labCount > 0) {
+      for (const [teacherKey, teacher] of course.theoryTeachers.entries()) {
+        if (course.labTeachers.has(teacherKey)) {
+          continue;
+        }
+
+        theoryTeacherMissingLabRows.push({
+          docente: teacher.nombre || null,
+          numEmp: teacher.numEmp || null,
+          rfc: teacher.rfc || null,
+          grupo: course.grupo || null,
+          turno: course.turno || null,
+          carrera: course.carreraDesc || course.carreraId || null,
+          asignaturaBase: course.subjectBase || null,
+          asignaturasTeoria: Array.from(course.theorySubjectNames).filter(Boolean).join(' | ') || null,
+          asignaturasLaboratorio: Array.from(course.labSubjectNames).filter(Boolean).join(' | ') || null,
+          docentesLaboratorio: Array.from(course.labTeachers.values())
+            .map((item) => item.nombre || item.numEmp || item.rfc || 'SIN IDENTIFICADOR')
+            .join(' | '),
+        });
+      }
+    }
+
+    if (labCount > 0 && theoryCount === 0) {
+      labWithoutTheoryRows.push({
+        grupo: course.grupo || null,
+        turno: course.turno || null,
+        carrera: course.carreraDesc || course.carreraId || null,
+        asignaturaBase: course.subjectBase || null,
+        asignaturasLaboratorio: Array.from(course.labSubjectNames).filter(Boolean).join(' | ') || null,
+        docentesLaboratorio: Array.from(course.labTeachers.values())
+          .map((item) => item.nombre || item.numEmp || item.rfc || 'SIN IDENTIFICADOR')
+          .join(' | '),
+        totalDocentesLaboratorio: labCount,
+      });
+    }
+  }
+
+  theoryTeacherMissingLabRows.sort((a, b) => {
+    const groupCompare = String(a.grupo || '').localeCompare(String(b.grupo || ''), 'es', { sensitivity: 'base' });
+    if (groupCompare !== 0) {
+      return groupCompare;
+    }
+    return String(a.docente || '').localeCompare(String(b.docente || ''), 'es', { sensitivity: 'base' });
+  });
+
+  labWithoutTheoryRows.sort((a, b) => {
+    const groupCompare = String(a.grupo || '').localeCompare(String(b.grupo || ''), 'es', { sensitivity: 'base' });
+    if (groupCompare !== 0) {
+      return groupCompare;
+    }
+    return String(a.asignaturaBase || '').localeCompare(String(b.asignaturaBase || ''), 'es', { sensitivity: 'base' });
+  });
+
+  return {
+    totalParesEvaluados: byCourse.size,
+    totalDocentesTeoriaSinLaboratorio: theoryTeacherMissingLabRows.length,
+    totalGruposLaboratorioSinTeoria: labWithoutTheoryRows.length,
+    theoryTeacherMissingLabRows,
+    labWithoutTheoryRows,
   };
 }
 
@@ -861,6 +1047,7 @@ async function analistaAnalyticsPage(req, res) {
   let modalidadOptions = [];
   let carreraDescOptions = [];
   let labDominanceReport = null;
+  let theoryLabCoverageReport = null;
   let tecnicoDocentesConCargaReport = null;
   let mxgRuaaOverlapReport = null;
   let latestPxpUpload = null;
@@ -975,6 +1162,31 @@ async function analistaAnalyticsPage(req, res) {
           raw: true,
         });
         labDominanceReport = buildLabDominanceReport(mxgRowsForLabDominance, pxpTeacherByNumEmp);
+
+        const mxgRowsForTheoryLabCoverage = await MxgScheduleImport.findAll({
+          where: {
+            uploadId: latestMxgUpload.id,
+            ...(schoolWhereMxg || {}),
+          },
+          attributes: [
+            'plantelId',
+            'plantelDesc',
+            'cicloId',
+            'carreraId',
+            'carreraDesc',
+            'planEstudio',
+            'grupo',
+            'turno',
+            'asignaturaDesc',
+            'asigTipo',
+            'numEmp',
+            'rfc',
+            'nombre',
+          ],
+          raw: true,
+        });
+
+        theoryLabCoverageReport = buildTheoryLabCoverageReport(mxgRowsForTheoryLabCoverage, pxpTeacherByNumEmp);
       }
 
       const mxgRowsForTecnicosConCarga = await MxgScheduleImport.findAll({
@@ -1066,6 +1278,7 @@ async function analistaAnalyticsPage(req, res) {
     escuelaHorasSolicitadas,
     hrsXCubHistogram,
     labDominanceReport,
+    theoryLabCoverageReport,
     tecnicoDocentesConCargaReport,
     mxgRuaaOverlapReport,
     semNivelOptions,
@@ -1503,6 +1716,124 @@ async function exportLabDominanceCsv(req, res) {
     return res.send(`\uFEFF${lines.join('\n')}`);
   } catch (error) {
     setFlash(req, 'error', `No se pudo exportar CSV del reporte de laboratorio: ${error.message}`);
+    return res.redirect('/analista/analitica');
+  }
+}
+
+async function exportTheoryLabCoverageCsv(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar el reporte.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
+    if (!latestMxgUpload) {
+      setFlash(req, 'error', 'No hay carga MXG disponible para exportar.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const queryInterface = sequelize.getQueryInterface();
+    const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
+    if (!mxgTableColumns.asigTipo) {
+      setFlash(req, 'error', 'La tabla MXG no tiene la columna asigTipo disponible.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const mxgRows = await MxgScheduleImport.findAll({
+      where: {
+        uploadId: latestMxgUpload.id,
+        ...(schoolWhereMxg || {}),
+      },
+      attributes: [
+        'plantelId',
+        'plantelDesc',
+        'cicloId',
+        'carreraId',
+        'carreraDesc',
+        'planEstudio',
+        'grupo',
+        'turno',
+        'asignaturaDesc',
+        'asigTipo',
+        'numEmp',
+        'rfc',
+        'nombre',
+      ],
+      raw: true,
+    });
+
+    let pxpTeacherByNumEmp = new Map();
+    const latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
+    if (latestPxpUpload) {
+      const pxpTeacherRows = await TeacherImport.findAll({
+        where: {
+          uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre'],
+        raw: true,
+      });
+      pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
+    }
+
+    const report = buildTheoryLabCoverageReport(mxgRows, pxpTeacherByNumEmp);
+
+    const lines = [
+      'Campo,Valor',
+      `Escuela seleccionada,${csvEscape(activeSchool.label)}`,
+      `Pares grupo-materia evaluados,${csvEscape(report.totalParesEvaluados)}`,
+      `Docentes T-TEORIA sin L-LABORATORIO,${csvEscape(report.totalDocentesTeoriaSinLaboratorio)}`,
+      `Grupos-materia con L-LABORATORIO y sin T-TEORIA,${csvEscape(report.totalGruposLaboratorioSinTeoria)}`,
+      '',
+      'Seccion,Docente,Numero de empleado,RFC,Grupo,Turno,Carrera,Materia base,Asignatura(s) teoria,Asignatura(s) laboratorio,Docente(s) laboratorio,Total docentes laboratorio',
+    ];
+
+    for (const item of report.theoryTeacherMissingLabRows) {
+      lines.push([
+        csvEscape('T sin L'),
+        csvEscape(item.docente || ''),
+        csvEscape(item.numEmp || ''),
+        csvEscape(item.rfc || ''),
+        csvEscape(item.grupo || ''),
+        csvEscape(item.turno || ''),
+        csvEscape(item.carrera || ''),
+        csvEscape(item.asignaturaBase || ''),
+        csvEscape(item.asignaturasTeoria || ''),
+        csvEscape(item.asignaturasLaboratorio || ''),
+        csvEscape(item.docentesLaboratorio || ''),
+        csvEscape(''),
+      ].join(','));
+    }
+
+    for (const item of report.labWithoutTheoryRows) {
+      lines.push([
+        csvEscape('L sin T'),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(item.grupo || ''),
+        csvEscape(item.turno || ''),
+        csvEscape(item.carrera || ''),
+        csvEscape(item.asignaturaBase || ''),
+        csvEscape(''),
+        csvEscape(item.asignaturasLaboratorio || ''),
+        csvEscape(item.docentesLaboratorio || ''),
+        csvEscape(item.totalDocentesLaboratorio || 0),
+      ].join(','));
+    }
+
+    const fileName = `cobertura_teoria_laboratorio_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV del reporte T/L: ${error.message}`);
     return res.redirect('/analista/analitica');
   }
 }
@@ -2026,6 +2357,7 @@ module.exports = {
   updateProposalStatus,
   exportSubstitutionProposalsCsv,
   exportLabDominanceCsv,
+  exportTheoryLabCoverageCsv,
   exportMxgRuaaOverlapCsv,
   escuelaDashboard,
 };

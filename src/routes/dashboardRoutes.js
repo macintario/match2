@@ -30,6 +30,7 @@ router.get('/dashboard', ensureAuth, dashboardController.redirectByRole);
 router.get('/analista', ensureAuth, requireRole(['analista']), dashboardController.analistaDashboard);
 router.get('/analista/analitica', ensureAuth, requireRole(['analista']), dashboardController.analistaAnalyticsPage);
 router.get('/analista/analitica/export-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportLabDominanceCsv);
+router.get('/analista/analitica/export-teoria-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportTheoryLabCoverageCsv);
 router.get('/analista/analitica/export-mxg-ruaa-overlap-csv', ensureAuth, requireRole(['analista']), dashboardController.exportMxgRuaaOverlapCsv);
 router.get('/analista/propuestas', ensureAuth, requireRole(['analista']), dashboardController.analistaProposalsPage);
 router.get('/analista/cargas', ensureAuth, requireRole(['analista']), dashboardController.analistaUploadPage);
