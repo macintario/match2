@@ -1300,18 +1300,101 @@ function redirectByRole(req, res) {
   return res.redirect('/escuela');
 }
 
-async function analistaDashboard(req, res) {
-  const schoolOptions = await getSchoolOptionsFromMxg();
-  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
-  const report = req.session.analistaXmlReport || null;
-  const historicoReport = req.session.analistaHistoricoReport || null;
-  const ruaaReport = req.session.analistaRuaaReport || null;
-  const mxgReport = req.session.analistaMxgReport || null;
-  const recentUploads = await XmlUpload.findAll({
+async function getRecentUploads() {
+  return XmlUpload.findAll({
     order: [['uploadedAt', 'DESC']],
     limit: 20,
     include: [{ model: User, attributes: ['id', 'name', 'username'] }],
   });
+}
+
+function parsePageNumber(value) {
+  const parsed = Number.parseInt(String(value || '1'), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function buildPaginationHref(basePath, originalQuery, pageParam, pageNumber) {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(originalQuery || {})) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') {
+          params.append(key, String(item));
+        }
+      });
+      continue;
+    }
+
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+
+  if (pageNumber <= 1) {
+    params.delete(pageParam);
+  } else {
+    params.set(pageParam, String(pageNumber));
+  }
+
+  const queryString = params.toString();
+  return queryString ? `${basePath}?${queryString}` : basePath;
+}
+
+function paginateCollection(items, currentPage, pageSize, pageParam, originalQuery, basePath) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const totalItems = safeItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
+  const page = Math.min(parsePageNumber(currentPage), totalPages);
+  const startIndex = (page - 1) * pageSize;
+  const pagedItems = safeItems.slice(startIndex, startIndex + pageSize);
+  const startItem = totalItems === 0 ? 0 : startIndex + 1;
+  const endItem = totalItems === 0 ? 0 : startIndex + pagedItems.length;
+
+  return {
+    items: pagedItems,
+    pagination: {
+      currentPage: page,
+      totalPages,
+      totalItems,
+      startItem,
+      endItem,
+      hasPrev: page > 1,
+      hasNext: page < totalPages,
+      prevHref:
+        page > 1
+          ? buildPaginationHref(basePath, originalQuery, pageParam, page - 1)
+          : null,
+      nextHref:
+        page < totalPages
+          ? buildPaginationHref(basePath, originalQuery, pageParam, page + 1)
+          : null,
+    },
+  };
+}
+
+async function getRecentUploadsPage(currentPage, pageSize) {
+  const totalItems = await XmlUpload.count();
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
+  const page = Math.min(parsePageNumber(currentPage), totalPages);
+  const uploads = await XmlUpload.findAll({
+    order: [['uploadedAt', 'DESC']],
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+    include: [{ model: User, attributes: ['id', 'name', 'username'] }],
+  });
+
+  return {
+    items: uploads,
+    totalItems,
+    totalPages,
+    currentPage: page,
+  };
+}
+
+async function analistaDashboard(req, res) {
+  const schoolOptions = await getSchoolOptionsFromMxg();
+  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
 
   const latestMxgUpload = await XmlUpload.findOne({
     where: { uploadType: 'MXG' },
@@ -1397,15 +1480,10 @@ async function analistaDashboard(req, res) {
     schoolOptions,
     activeSchoolKey,
     activeSchoolLabel: activeSchool?.label || '',
-    report,
-    historicoReport,
-    ruaaReport,
-    mxgReport,
     horasSolicitadasPorAcademia,
     detalleSolicitudesPorAcademia,
     horasSolicitadasTotales,
     escuelaHorasSolicitadas,
-    recentUploads,
   });
 }
 
@@ -2611,9 +2689,122 @@ async function exportMxgRuaaOverlapCsv(req, res) {
   }
 }
 
-function analistaUploadPage(req, res) {
+async function analistaUploadPage(req, res) {
+  const cargasPath = `${req.baseUrl || ''}/analista/cargas`;
+  const uploadsPageSize = 20;
+  const previewPageSize = 50;
+
+  const recentUploadsResult = await getRecentUploadsPage(req.query.uploadsPage, uploadsPageSize);
+  const uploadsPagination = {
+    currentPage: recentUploadsResult.currentPage,
+    totalPages: recentUploadsResult.totalPages,
+    totalItems: recentUploadsResult.totalItems,
+    startItem: recentUploadsResult.totalItems === 0 ? 0 : (recentUploadsResult.currentPage - 1) * uploadsPageSize + 1,
+    endItem:
+      recentUploadsResult.totalItems === 0
+        ? 0
+        : (recentUploadsResult.currentPage - 1) * uploadsPageSize + recentUploadsResult.items.length,
+    hasPrev: recentUploadsResult.currentPage > 1,
+    hasNext: recentUploadsResult.currentPage < recentUploadsResult.totalPages,
+    prevHref:
+      recentUploadsResult.currentPage > 1
+        ? buildPaginationHref(cargasPath, req.query, 'uploadsPage', recentUploadsResult.currentPage - 1)
+        : null,
+    nextHref:
+      recentUploadsResult.currentPage < recentUploadsResult.totalPages
+        ? buildPaginationHref(cargasPath, req.query, 'uploadsPage', recentUploadsResult.currentPage + 1)
+        : null,
+  };
+
+  const rawPxpReport = req.session.analistaXmlReport || null;
+  const rawHistoricoReport = req.session.analistaHistoricoReport || null;
+  const rawRuaaReport = req.session.analistaRuaaReport || null;
+  const rawMxgReport = req.session.analistaMxgReport || null;
+
+  const pxpPaginated = paginateCollection(
+    rawPxpReport?.docentes || [],
+    req.query.pxpPage,
+    previewPageSize,
+    'pxpPage',
+    req.query,
+    cargasPath
+  );
+  const historicoPaginated = paginateCollection(
+    rawHistoricoReport?.subjects || rawHistoricoReport?.subjectsPreview || [],
+    req.query.historicoPage,
+    previewPageSize,
+    'historicoPage',
+    req.query,
+    cargasPath
+  );
+  const ruaaClassPaginated = paginateCollection(
+    rawRuaaReport?.classSchedules || rawRuaaReport?.classPreview || [],
+    req.query.ruaaClassPage,
+    previewPageSize,
+    'ruaaClassPage',
+    req.query,
+    cargasPath
+  );
+  const ruaaActivityPaginated = paginateCollection(
+    rawRuaaReport?.activitySchedules || rawRuaaReport?.activityPreview || [],
+    req.query.ruaaActivityPage,
+    previewPageSize,
+    'ruaaActivityPage',
+    req.query,
+    cargasPath
+  );
+  const mxgPaginated = paginateCollection(
+    rawMxgReport?.additionalRequests || rawMxgReport?.additionalPreview || [],
+    req.query.mxgPage,
+    previewPageSize,
+    'mxgPage',
+    req.query,
+    cargasPath
+  );
+
+  const report = rawPxpReport
+    ? {
+      ...rawPxpReport,
+      docentesPreview: pxpPaginated.items,
+      previewPagination: pxpPaginated.pagination,
+    }
+    : null;
+  const historicoReport = rawHistoricoReport
+    ? {
+      ...rawHistoricoReport,
+      subjectsPreview: historicoPaginated.items,
+      previewPagination: historicoPaginated.pagination,
+      previewTruncated: historicoPaginated.pagination.totalPages > 1,
+    }
+    : null;
+  const ruaaReport = rawRuaaReport
+    ? {
+      ...rawRuaaReport,
+      classPreview: ruaaClassPaginated.items,
+      classPreviewPagination: ruaaClassPaginated.pagination,
+      activityPreview: ruaaActivityPaginated.items,
+      activityPreviewPagination: ruaaActivityPaginated.pagination,
+      previewTruncated:
+        ruaaClassPaginated.pagination.totalPages > 1 || ruaaActivityPaginated.pagination.totalPages > 1,
+    }
+    : null;
+  const mxgReport = rawMxgReport
+    ? {
+      ...rawMxgReport,
+      additionalPreview: mxgPaginated.items,
+      previewPagination: mxgPaginated.pagination,
+      previewTruncated: mxgPaginated.pagination.totalPages > 1,
+    }
+    : null;
+
   return res.render('analista-cargas', {
     title: 'Carga de Archivos',
+    report,
+    historicoReport,
+    ruaaReport,
+    mxgReport,
+    recentUploads: recentUploadsResult.items,
+    uploadsPagination,
   });
 }
 
@@ -2794,8 +2985,7 @@ async function uploadAnalistaHistoricoXml(req, res) {
 
     req.session.analistaHistoricoReport = {
       summary: historico.summary,
-      subjectsPreview: historico.subjects.slice(0, 120),
-      previewTruncated: historico.subjects.length > 120,
+      subjects: historico.subjects,
     };
 
     setFlash(
@@ -2915,10 +3105,8 @@ async function uploadAnalistaRuaaXml(req, res) {
 
     req.session.analistaRuaaReport = {
       summary: ruaa.summary,
-      classPreview: ruaa.classSchedules.slice(0, 80),
-      activityPreview: ruaa.activitySchedules.slice(0, 80),
-      previewTruncated:
-        ruaa.classSchedules.length > 80 || ruaa.activitySchedules.length > 80,
+      classSchedules: ruaa.classSchedules,
+      activitySchedules: ruaa.activitySchedules,
     };
 
     setFlash(
@@ -3004,10 +3192,7 @@ async function uploadAnalistaMxg(req, res) {
 
     req.session.analistaMxgReport = {
       summary: mxg.summary,
-      rowsPreview: mxg.rows.slice(0, 120),
-      additionalPreview: mxg.additionalRequests.slice(0, 120),
-      previewTruncated:
-        mxg.rows.length > 120 || mxg.additionalRequests.length > 120,
+      additionalRequests: mxg.additionalRequests,
     };
 
     setFlash(
