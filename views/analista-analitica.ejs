@@ -10,7 +10,7 @@
       <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
     </div>
 
-    <form method="GET" action="<%= basePath %>/analista/analitica" style="margin:0.75rem 0 1rem 0; display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap;">
+    <form id="school-filter-form" method="GET" action="<%= basePath %>/analista/analitica" style="margin:0.75rem 0 1rem 0; display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap;">
       <div style="display:flex; flex-direction:column; gap:0.25rem;">
         <label for="school-key" style="font-size:0.85rem; font-weight:600; color:#555;">Escuela de trabajo</label>
         <select id="school-key" name="schoolKey" class="form-control" style="min-width:280px;">
@@ -22,8 +22,24 @@
           <% }) %>
         </select>
       </div>
-      <button type="submit" class="btn btn-primary">Cambiar escuela</button>
+      <button type="submit" class="btn btn-primary" id="school-submit-btn">
+        <span>Cambiar escuela</span>
+        <div class="btn-spinner"></div>
+      </button>
     </form>
+
+    <script>
+      (function() {
+        const form = document.getElementById('school-filter-form');
+        const btn = document.getElementById('school-submit-btn');
+        if (form && btn) {
+          form.addEventListener('submit', function() {
+            btn.classList.add('is-loading');
+            btn.disabled = true;
+          });
+        }
+      })();
+    </script>
 
     <% if (activeSchoolLabel) { %>
       <p><strong>Escuela:</strong> <%= escuelaHorasSolicitadas %></p>
