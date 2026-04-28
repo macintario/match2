@@ -19,6 +19,16 @@ function asNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function pickFirstColumnValue(row, columnNames) {
+  for (const columnName of columnNames) {
+    const value = row[columnName];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+  return 0;
+}
+
 function parseMxgWorkbook(buffer) {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const firstSheetName = workbook.SheetNames[0];
@@ -36,7 +46,9 @@ function parseMxgWorkbook(buffer) {
   }
 
   const normalizedRows = rows.map((row) => {
-    const hrsNecesarias = asNumber(row.HRSNECESARIAS);
+    const hrsNecesarias = asNumber(
+      pickFirstColumnValue(row, ['HRSNECESARIAS', 'HRS SOLICITADAS'])
+    );
     return {
       modalidad: asString(row.MODALIDAD),
       plantelId: asString(row.PLANTEL),
