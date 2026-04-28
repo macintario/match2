@@ -75,7 +75,7 @@
           }
 
           const ctx = canvas.getContext('2d');
-          const rowHeight = 42;
+          const rowHeight = 56;
           const chartHeight = Math.max(240, academias.length * rowHeight);
           const paddingTop = 24;
           const paddingBottom = 28;
@@ -86,9 +86,29 @@
           const minAge = Math.min.apply(null, data.map(function (item) { return Number(item.edad || 0); })) || 20;
           const xMin = Math.max(18, Math.floor(minAge / 5) * 5 - 5);
           const xMax = Math.max(xMin + 10, Math.ceil(maxAge / 5) * 5 + 5);
+          const plottedPoints = [];
+          const pointRadiusBase = 4.5;
+          const collisionPadding = 1.5;
+          const swarmStep = Math.max(4.5, pointRadiusBase * 1.45);
+          const maxOffsetPerRow = rowHeight * 0.42;
+          const rawPointsByAcademia = academias.map(function () { return []; });
 
           canvas.width = paddingLeft + chartWidth + paddingRight;
           canvas.height = paddingTop + chartHeight + paddingBottom;
+
+          const tooltip = document.createElement('div');
+          tooltip.style.position = 'fixed';
+          tooltip.style.pointerEvents = 'none';
+          tooltip.style.background = 'rgba(31, 35, 40, 0.96)';
+          tooltip.style.color = '#fff';
+          tooltip.style.padding = '8px 10px';
+          tooltip.style.borderRadius = '8px';
+          tooltip.style.font = '12px sans-serif';
+          tooltip.style.lineHeight = '1.35';
+          tooltip.style.boxShadow = '0 10px 24px rgba(0, 0, 0, 0.18)';
+          tooltip.style.zIndex = '9999';
+          tooltip.style.display = 'none';
+          document.body.appendChild(tooltip);
 
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.fillStyle = '#f8f9fa';
@@ -123,23 +143,197 @@
             ctx.fillText(academia.length > 36 ? academia.slice(0, 33) + '...' : academia, paddingLeft - 12, y + 4);
           });
 
+          function buildOffsetCandidates(maxOffset, step) {
+            const candidates = [0];
+            const levels = Math.max(1, Math.floor(maxOffset / step));
+            for (let i = 1; i <= levels; i += 1) {
+              const value = i * step;
+              candidates.push(value);
+              candidates.push(-value);
+            }
+            return candidates;
+          }
+
+          const offsetCandidates = buildOffsetCandidates(maxOffsetPerRow, swarmStep);
+
           data.forEach(function (item) {
             const academiaIndex = academias.indexOf(item.academiaDesc || 'Sin academia');
             if (academiaIndex < 0) {
               return;
             }
-            const x = paddingLeft + ((Number(item.edad || 0) - xMin) / (xMax - xMin)) * chartWidth;
-            const y = paddingTop + academiaIndex * rowHeight + rowHeight / 2;
-            const color = Number(item.edad || 0) >= 60 ? '#d94841' : Number(item.edad || 0) < 45 ? '#2b8a3e' : '#2563eb';
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fill();
+
+            const age = Number(item.edad || 0);
+            const x = paddingLeft + ((age - xMin) / (xMax - xMin)) * chartWidth;
+            const color = age >= 60 ? '#d94841' : age < 45 ? '#2b8a3e' : '#2563eb';
+
+            rawPointsByAcademia[academiaIndex].push({
+              x: x,
+              docente: item.docente || 'Docente sin nombre',
+              edad: age,
+              academia: item.academiaDesc || 'Sin academia',
+              color: color,
+            });
+          });
+
+          academias.forEach(function (_, academiaIndex) {
+            const rowCenterY = paddingTop + academiaIndex * rowHeight + rowHeight / 2;
+            const points = rawPointsByAcademia[academiaIndex]
+              .slice()
+              .sort(function (a, b) {
+                if (a.x !== b.x) {
+                  return a.x - b.x;
+                }
+                return String(a.docente || '').localeCompare(String(b.docente || ''), 'es', { sensitivity: 'base' });
+              });
+
+            const placed = [];
+
+            points.forEach(function (point, pointIndex) {
+              let chosenOffset = 0;
+              let chosenRadius = pointRadiusBase;
+              let found = false;
+
+              for (let radiusTry = 0; radiusTry < 3 && !found; radiusTry += 1) {
+                const candidateRadius = Math.max(2.6, pointRadiusBase - radiusTry * 0.8);
+
+                for (let i = 0; i < offsetCandidates.length; i += 1) {
+                  const candidateOffset = offsetCandidates[i];
+                  const hasCollision = placed.some(function (existing) {
+                    const dx = point.x - existing.x;
+                    const dy = candidateOffset - existing.offset;
+                    const minDist = candidateRadius + existing.radius + collisionPadding;
+                    return (dx * dx + dy * dy) < (minDist * minDist);
+                  });
+
+                  if (!hasCollision) {
+                    chosenOffset = candidateOffset;
+                    chosenRadius = candidateRadius;
+                    found = true;
+                    break;
+                  }
+                }
+              }
+
+              if (!found) {
+                chosenOffset = offsetCandidates[pointIndex % offsetCandidates.length] || 0;
+                chosenRadius = 2.6;
+              }
+
+              const y = rowCenterY + chosenOffset;
+              ctx.fillStyle = point.color;
+              ctx.beginPath();
+              ctx.arc(point.x, y, chosenRadius, 0, Math.PI * 2);
+              ctx.fill();
+
+              placed.push({
+                x: point.x,
+                offset: chosenOffset,
+                radius: chosenRadius,
+              });
+
+              plottedPoints.push({
+                x: point.x,
+                y: y,
+                radius: Math.max(9, chosenRadius + 4),
+                drawRadius: chosenRadius,
+                docente: point.docente,
+                edad: point.edad,
+                academia: point.academia,
+              });
+            });
           });
 
           ctx.fillStyle = '#1f2328';
           ctx.textAlign = 'center';
           ctx.fillText('Edad del docente', paddingLeft + chartWidth / 2, canvas.height - 4);
+
+          function hideTooltip() {
+            tooltip.style.display = 'none';
+          }
+
+          function showTooltip(point, clientX, clientY) {
+            tooltip.innerHTML = '<strong>'
+              + point.docente.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+              + '</strong><br>Edad: '
+              + point.edad
+              + '<br>Academia: '
+              + point.academia.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            tooltip.style.display = 'block';
+            tooltip.style.left = (clientX + 14) + 'px';
+            tooltip.style.top = (clientY + 14) + 'px';
+          }
+
+          function findPointAtClientPosition(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = ((clientX - rect.left) / rect.width) * canvas.width;
+            const y = ((clientY - rect.top) / rect.height) * canvas.height;
+
+            return plottedPoints.find(function (item) {
+              const dx = x - item.x;
+              const dy = y - item.y;
+              return Math.sqrt(dx * dx + dy * dy) <= item.radius;
+            }) || null;
+          }
+
+          canvas.addEventListener('mousemove', function (event) {
+            const point = findPointAtClientPosition(event.clientX, event.clientY);
+
+            if (!point) {
+              hideTooltip();
+              canvas.style.cursor = 'default';
+              return;
+            }
+
+            showTooltip(point, event.clientX, event.clientY);
+            canvas.style.cursor = 'pointer';
+          });
+
+          canvas.addEventListener('click', function (event) {
+            const point = findPointAtClientPosition(event.clientX, event.clientY);
+            if (!point) {
+              hideTooltip();
+              canvas.style.cursor = 'default';
+              return;
+            }
+
+            showTooltip(point, event.clientX, event.clientY);
+            canvas.style.cursor = 'pointer';
+          });
+
+          canvas.addEventListener('touchstart', function (event) {
+            const touch = event.touches && event.touches[0];
+            if (!touch) {
+              return;
+            }
+
+            const point = findPointAtClientPosition(touch.clientX, touch.clientY);
+            if (!point) {
+              hideTooltip();
+              return;
+            }
+
+            showTooltip(point, touch.clientX, touch.clientY);
+            event.preventDefault();
+          }, { passive: false });
+
+          document.addEventListener('touchstart', function (event) {
+            if (canvas.contains(event.target)) {
+              return;
+            }
+            hideTooltip();
+          }, { passive: true });
+
+          document.addEventListener('click', function (event) {
+            if (canvas.contains(event.target)) {
+              return;
+            }
+            hideTooltip();
+          });
+
+          canvas.addEventListener('mouseleave', function () {
+            canvas.style.cursor = 'default';
+            hideTooltip();
+          });
         })();
       </script>
 
