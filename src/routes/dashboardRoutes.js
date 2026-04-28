@@ -29,6 +29,7 @@ function handleXmlUpload(req, res, next) {
 router.get('/dashboard', ensureAuth, dashboardController.redirectByRole);
 router.get('/analista', ensureAuth, requireRole(['analista']), dashboardController.analistaDashboard);
 router.get('/analista/analitica', ensureAuth, requireRole(['analista']), dashboardController.analistaAnalyticsPage);
+router.get('/analista/analitica/export-academia-age-risk-csv', ensureAuth, requireRole(['analista']), dashboardController.exportAcademiaAgeRiskCsv);
 router.get('/analista/analitica/export-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportLabDominanceCsv);
 router.get('/analista/analitica/export-teoria-laboratorio-csv', ensureAuth, requireRole(['analista']), dashboardController.exportTheoryLabCoverageCsv);
 router.get('/analista/analitica/export-hrs-necesarias-sin-hist-csv', ensureAuth, requireRole(['analista']), dashboardController.exportMxgNeedsHoursWithoutHistCsv);

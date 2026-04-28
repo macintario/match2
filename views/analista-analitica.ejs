@@ -31,6 +31,156 @@
       <p style="color:#8a6d3b;">Selecciona una escuela para consultar analitica y reportes.</p>
     <% } %>
 
+    <h3>Edad de docentes por academia</h3>
+    <% if (!academiaAgeRiskReport) { %>
+      <p>Sin datos para generar la relacion entre academias y edades. Carga PxP y MXG para la escuela activa.</p>
+    <% } else if (!academiaAgeRiskReport.teacherAgesForChart || academiaAgeRiskReport.teacherAgesForChart.length === 0) { %>
+      <p>No se pudieron calcular edades validas desde RFC para los docentes del conjunto filtrado.</p>
+    <% } else { %>
+      <p>
+        <strong>Academias:</strong> <%= academiaAgeRiskReport.totalAcademias %>
+        | <strong>Docentes con edad calculada:</strong> <%= academiaAgeRiskReport.totalDocentesConEdad %>
+        | <strong>Riesgo alto:</strong> <%= academiaAgeRiskReport.academiasConRiesgoAlto %>
+        | <strong>Riesgo medio:</strong> <%= academiaAgeRiskReport.academiasConRiesgoMedio %>
+      </p>
+      <p>
+        Criterio de riesgo: <strong>edad avanzada</strong> = <%= academiaAgeRiskReport.seniorAgeThreshold %> o mas.
+        Se considera <strong>riesgo alto</strong> si la academia tiene docentes de edad avanzada y ningun docente menor de
+        <%= academiaAgeRiskReport.youngAgeThreshold %> anos; <strong>riesgo medio</strong> si solo tiene uno menor de ese umbral.
+      </p>
+
+      <% const exportAcademiaAgeParams = []; %>
+      <% if (activeSchoolKey) exportAcademiaAgeParams.push(`schoolKey=${encodeURIComponent(activeSchoolKey)}`); %>
+      <% if (filterSemNivel && hasSemNivelField) exportAcademiaAgeParams.push(`semNivel=${encodeURIComponent(filterSemNivel)}`); %>
+      <% if (filterAcademia) exportAcademiaAgeParams.push(`academia=${encodeURIComponent(filterAcademia)}`); %>
+      <% if (filterAsigTipo && hasAsigTipoField) exportAcademiaAgeParams.push(`asigTipo=${encodeURIComponent(filterAsigTipo)}`); %>
+      <% if (filterModalidad) exportAcademiaAgeParams.push(`modalidad=${encodeURIComponent(filterModalidad)}`); %>
+      <% if (filterCarreraDesc) exportAcademiaAgeParams.push(`carreraDesc=${encodeURIComponent(filterCarreraDesc)}`); %>
+      <% const exportAcademiaAgeQuery = exportAcademiaAgeParams.length ? `?${exportAcademiaAgeParams.join('&')}` : ''; %>
+      <div style="margin-bottom:10px;">
+        <a href="<%= basePath %>/analista/analitica/export-academia-age-risk-csv<%= exportAcademiaAgeQuery %>" class="btn btn-secondary">Descargar reporte CSV</a>
+      </div>
+
+      <div style="overflow-x:auto; margin-bottom:1rem;">
+        <canvas id="academiaAgeChart" height="360" style="max-width:100%;"></canvas>
+      </div>
+
+      <script>
+        (function () {
+          const data = <%- JSON.stringify(academiaAgeRiskReport.teacherAgesForChart || []) %>;
+          const academias = Array.from(new Set(data.map(function (item) { return item.academiaDesc || 'Sin academia'; })));
+          const canvas = document.getElementById('academiaAgeChart');
+          if (!canvas || academias.length === 0) {
+            return;
+          }
+
+          const ctx = canvas.getContext('2d');
+          const rowHeight = 42;
+          const chartHeight = Math.max(240, academias.length * rowHeight);
+          const paddingTop = 24;
+          const paddingBottom = 28;
+          const paddingLeft = 260;
+          const paddingRight = 28;
+          const chartWidth = 760;
+          const maxAge = Math.max.apply(null, data.map(function (item) { return Number(item.edad || 0); })) || 80;
+          const minAge = Math.min.apply(null, data.map(function (item) { return Number(item.edad || 0); })) || 20;
+          const xMin = Math.max(18, Math.floor(minAge / 5) * 5 - 5);
+          const xMax = Math.max(xMin + 10, Math.ceil(maxAge / 5) * 5 + 5);
+
+          canvas.width = paddingLeft + chartWidth + paddingRight;
+          canvas.height = paddingTop + chartHeight + paddingBottom;
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#f8f9fa';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.font = '12px sans-serif';
+
+          for (let tick = xMin; tick <= xMax; tick += 5) {
+            const x = paddingLeft + ((tick - xMin) / (xMax - xMin)) * chartWidth;
+            ctx.strokeStyle = tick === 60 ? '#d94841' : '#dde2e7';
+            ctx.lineWidth = tick === 60 ? 2 : 1;
+            ctx.beginPath();
+            ctx.moveTo(x, paddingTop);
+            ctx.lineTo(x, paddingTop + chartHeight);
+            ctx.stroke();
+
+            ctx.fillStyle = tick === 60 ? '#a61e1e' : '#57606a';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(tick), x, paddingTop + chartHeight + 18);
+          }
+
+          academias.forEach(function (academia, index) {
+            const y = paddingTop + index * rowHeight + rowHeight / 2;
+            ctx.strokeStyle = '#eef1f4';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(paddingLeft, y + rowHeight / 2 - 2);
+            ctx.lineTo(paddingLeft + chartWidth, y + rowHeight / 2 - 2);
+            ctx.stroke();
+
+            ctx.fillStyle = '#1f2328';
+            ctx.textAlign = 'right';
+            ctx.fillText(academia.length > 36 ? academia.slice(0, 33) + '...' : academia, paddingLeft - 12, y + 4);
+          });
+
+          data.forEach(function (item) {
+            const academiaIndex = academias.indexOf(item.academiaDesc || 'Sin academia');
+            if (academiaIndex < 0) {
+              return;
+            }
+            const x = paddingLeft + ((Number(item.edad || 0) - xMin) / (xMax - xMin)) * chartWidth;
+            const y = paddingTop + academiaIndex * rowHeight + rowHeight / 2;
+            const color = Number(item.edad || 0) >= 60 ? '#d94841' : Number(item.edad || 0) < 45 ? '#2b8a3e' : '#2563eb';
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          ctx.fillStyle = '#1f2328';
+          ctx.textAlign = 'center';
+          ctx.fillText('Edad del docente', paddingLeft + chartWidth / 2, canvas.height - 4);
+        })();
+      </script>
+
+      <div class="table-wrap" style="margin-bottom:1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Academia</th>
+              <th>Riesgo</th>
+              <th>Total docentes</th>
+              <th>Con edad</th>
+              <th>Sin edad</th>
+              <th>Edad promedio</th>
+              <th>Menor edad</th>
+              <th>Mayor edad</th>
+              <th>Docentes >= <%= academiaAgeRiskReport.seniorAgeThreshold %></th>
+              <th>Docentes &lt; <%= academiaAgeRiskReport.youngAgeThreshold %></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% academiaAgeRiskReport.rows.forEach(function(item) { %>
+              <tr>
+                <td><%= item.academiaDesc || '-' %></td>
+                <td>
+                  <span style="font-weight:700; color:<%= item.riskLevel === 'ALTO' ? '#a61e1e' : item.riskLevel === 'MEDIO' ? '#b26a00' : '#2b8a3e' %>;"><%= item.riskLevel %></span>
+                </td>
+                <td><%= item.totalDocentes %></td>
+                <td><%= item.docentesConEdad %></td>
+                <td><%= item.docentesSinEdad %></td>
+                <td><%= item.averageAge !== null ? item.averageAge.toFixed(1) : '-' %></td>
+                <td><%= item.youngestAge !== null ? item.youngestAge : '-' %></td>
+                <td><%= item.oldestAge !== null ? item.oldestAge : '-' %></td>
+                <td><%= item.seniorCount %></td>
+                <td><%= item.youngCount %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+
     <h3>Reporte: tecnicos docentes con carga</h3>
     <% if (!tecnicoDocentesConCargaReport) { %>
       <p>Sin datos para generar el reporte. Carga PxP y MXG para la escuela activa.</p>

@@ -659,6 +659,178 @@ function buildMxgNeedsHoursWithoutHistoricalMatchReport(
   };
 }
 
+function extractBirthDateFromRfc(rfc, referenceDate = new Date()) {
+  const clean = String(rfc || '').trim().toUpperCase();
+  const match = clean.match(/^[A-Z&Ñ]{3,4}(\d{2})(\d{2})(\d{2})/);
+  if (!match) {
+    return null;
+  }
+
+  const yy = Number(match[1]);
+  const mm = Number(match[2]);
+  const dd = Number(match[3]);
+  if (!Number.isInteger(yy) || !Number.isInteger(mm) || !Number.isInteger(dd)) {
+    return null;
+  }
+
+  const currentYear = referenceDate.getFullYear();
+  const currentCentury = Math.floor(currentYear / 100) * 100;
+  let fullYear = currentCentury + yy;
+  let birthDate = new Date(fullYear, mm - 1, dd);
+
+  if (
+    birthDate.getFullYear() !== fullYear
+    || birthDate.getMonth() !== mm - 1
+    || birthDate.getDate() !== dd
+  ) {
+    return null;
+  }
+
+  if (birthDate > referenceDate) {
+    fullYear -= 100;
+    birthDate = new Date(fullYear, mm - 1, dd);
+  }
+
+  let age = referenceDate.getFullYear() - birthDate.getFullYear();
+  const monthDelta = referenceDate.getMonth() - birthDate.getMonth();
+  const dayDelta = referenceDate.getDate() - birthDate.getDate();
+  if (monthDelta < 0 || (monthDelta === 0 && dayDelta < 0)) {
+    age -= 1;
+  }
+
+  if (age < 18) {
+    fullYear -= 100;
+    birthDate = new Date(fullYear, mm - 1, dd);
+    age = referenceDate.getFullYear() - birthDate.getFullYear();
+    const monthDelta2 = referenceDate.getMonth() - birthDate.getMonth();
+    const dayDelta2 = referenceDate.getDate() - birthDate.getDate();
+    if (monthDelta2 < 0 || (monthDelta2 === 0 && dayDelta2 < 0)) {
+      age -= 1;
+    }
+  }
+
+  if (age < 18 || age > 100) {
+    return null;
+  }
+
+  return birthDate;
+}
+
+function calculateAgeFromRfc(rfc, referenceDate = new Date()) {
+  const birthDate = extractBirthDateFromRfc(rfc, referenceDate);
+  if (!birthDate) {
+    return null;
+  }
+
+  let age = referenceDate.getFullYear() - birthDate.getFullYear();
+  const monthDelta = referenceDate.getMonth() - birthDate.getMonth();
+  const dayDelta = referenceDate.getDate() - birthDate.getDate();
+  if (monthDelta < 0 || (monthDelta === 0 && dayDelta < 0)) {
+    age -= 1;
+  }
+  return age;
+}
+
+function buildAcademiaAgeRiskReport(mxgRows, pxpTeacherByNumEmp = new Map(), referenceDate = new Date()) {
+  const SENIOR_AGE = 60;
+  const YOUNG_AGE = 45;
+  const byAcademia = new Map();
+  const teacherAgesForChart = [];
+
+  for (const row of mxgRows || []) {
+    const academiaDesc = String(row.academiaDesc || '').trim() || 'Sin academia';
+    const identity = resolveMxgTeacherIdentity(row, pxpTeacherByNumEmp);
+    const teacherKey = buildTeacherIdentityKey(identity);
+    const age = calculateAgeFromRfc(identity.rfc, referenceDate);
+
+    if (!byAcademia.has(academiaDesc)) {
+      byAcademia.set(academiaDesc, {
+        academiaDesc,
+        teachers: new Map(),
+        teachersWithoutAge: 0,
+      });
+    }
+
+    const academia = byAcademia.get(academiaDesc);
+    if (academia.teachers.has(teacherKey)) {
+      continue;
+    }
+
+    academia.teachers.set(teacherKey, {
+      docente: identity.nombre || row.nombre || null,
+      numEmp: identity.numEmp || null,
+      rfc: identity.rfc || null,
+      age,
+    });
+
+    if (age === null) {
+      academia.teachersWithoutAge += 1;
+      continue;
+    }
+
+    teacherAgesForChart.push({
+      academiaDesc,
+      docente: identity.nombre || row.nombre || 'Docente sin nombre',
+      edad: age,
+    });
+  }
+
+  const rows = Array.from(byAcademia.values()).map((academia) => {
+    const teachers = Array.from(academia.teachers.values());
+    const ages = teachers.map((item) => item.age).filter((value) => Number.isInteger(value));
+    const seniorCount = ages.filter((value) => value >= SENIOR_AGE).length;
+    const youngCount = ages.filter((value) => value < YOUNG_AGE).length;
+    const averageAge = ages.length
+      ? ages.reduce((acc, value) => acc + value, 0) / ages.length
+      : null;
+    const oldestAge = ages.length ? Math.max(...ages) : null;
+    const youngestAge = ages.length ? Math.min(...ages) : null;
+
+    let riskLevel = 'BAJO';
+    if (seniorCount > 0 && youngCount === 0) {
+      riskLevel = 'ALTO';
+    } else if (seniorCount > 0 && youngCount === 1) {
+      riskLevel = 'MEDIO';
+    }
+
+    return {
+      academiaDesc: academia.academiaDesc,
+      totalDocentes: teachers.length,
+      docentesConEdad: ages.length,
+      docentesSinEdad: academia.teachersWithoutAge,
+      averageAge: averageAge !== null ? Number(averageAge.toFixed(1)) : null,
+      youngestAge,
+      oldestAge,
+      seniorCount,
+      youngCount,
+      riskLevel,
+    };
+  });
+
+  rows.sort((a, b) => {
+    const riskOrder = { ALTO: 0, MEDIO: 1, BAJO: 2 };
+    const riskCompare = riskOrder[a.riskLevel] - riskOrder[b.riskLevel];
+    if (riskCompare !== 0) {
+      return riskCompare;
+    }
+    if ((b.oldestAge || 0) !== (a.oldestAge || 0)) {
+      return (b.oldestAge || 0) - (a.oldestAge || 0);
+    }
+    return String(a.academiaDesc || '').localeCompare(String(b.academiaDesc || ''), 'es', { sensitivity: 'base' });
+  });
+
+  return {
+    seniorAgeThreshold: SENIOR_AGE,
+    youngAgeThreshold: YOUNG_AGE,
+    totalAcademias: rows.length,
+    academiasConRiesgoAlto: rows.filter((item) => item.riskLevel === 'ALTO').length,
+    academiasConRiesgoMedio: rows.filter((item) => item.riskLevel === 'MEDIO').length,
+    totalDocentesConEdad: teacherAgesForChart.length,
+    rows,
+    teacherAgesForChart,
+  };
+}
+
 function normalizeCategoryKey(value) {
   return String(value || '')
     .normalize('NFD')
@@ -1259,6 +1431,7 @@ async function analistaAnalyticsPage(req, res) {
   let labDominanceReport = null;
   let theoryLabCoverageReport = null;
   let mxgNeedsHoursWithoutHistoricalMatchReport = null;
+  let academiaAgeRiskReport = null;
   let tecnicoDocentesConCargaReport = null;
   let mxgRuaaOverlapReport = null;
   let latestPxpUpload = null;
@@ -1419,6 +1592,14 @@ async function analistaAnalyticsPage(req, res) {
         categorySourceError: categoryInfo.sourceError,
       });
 
+      const mxgRowsForAcademiaAgeRisk = await MxgScheduleImport.findAll({
+        where: heatmapWhere,
+        attributes: ['numEmp', 'rfc', 'nombre', 'academiaDesc'],
+        raw: true,
+      });
+
+      academiaAgeRiskReport = buildAcademiaAgeRiskReport(mxgRowsForAcademiaAgeRisk, pxpTeacherByNumEmp);
+
       const latestHistoricoUpload = await findLatestUploadForSchool('HISTORICO', HistoricalSubjectImport, schoolWhereHistorico);
       const [mxgRowsForNeedsVsHist, historicalRowsForNeedsVsHist] = await Promise.all([
         MxgScheduleImport.findAll({
@@ -1534,6 +1715,7 @@ async function analistaAnalyticsPage(req, res) {
     labDominanceReport,
     theoryLabCoverageReport,
     mxgNeedsHoursWithoutHistoricalMatchReport,
+    academiaAgeRiskReport,
     tecnicoDocentesConCargaReport,
     mxgRuaaOverlapReport,
     semNivelOptions,
@@ -2207,6 +2389,140 @@ async function exportMxgNeedsHoursWithoutHistCsv(req, res) {
   }
 }
 
+async function exportAcademiaAgeRiskCsv(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+    if (!activeSchoolKey || !activeSchool) {
+      setFlash(req, 'error', 'No hay escuela seleccionada para exportar el reporte.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const filterSemNivel = req.query.semNivel || '';
+    const filterAcademia = req.query.academia || '';
+    const filterAsigTipo = req.query.asigTipo || '';
+    const filterModalidad = req.query.modalidad || '';
+    const filterCarreraDesc = req.query.carreraDesc || '';
+
+    const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+    const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+
+    const latestMxgUpload = await findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg);
+    if (!latestMxgUpload) {
+      setFlash(req, 'error', 'No hay carga MXG disponible para exportar.');
+      return res.redirect('/analista/analitica');
+    }
+
+    const queryInterface = sequelize.getQueryInterface();
+    const mxgTableColumns = await queryInterface.describeTable('mxg_schedule_imports').catch(() => ({}));
+
+    const filterWhere = {
+      uploadId: latestMxgUpload.id,
+      ...(schoolWhereMxg || {}),
+    };
+    if (filterSemNivel && mxgTableColumns.semNivel) filterWhere.semNivel = filterSemNivel;
+    if (filterAcademia) filterWhere.academiaDesc = filterAcademia;
+    if (filterAsigTipo && mxgTableColumns.asigTipo) filterWhere.asigTipo = filterAsigTipo;
+    if (filterModalidad) filterWhere.modalidad = filterModalidad;
+    if (filterCarreraDesc) filterWhere.carreraDesc = filterCarreraDesc;
+
+    const mxgRows = await MxgScheduleImport.findAll({
+      where: filterWhere,
+      attributes: ['numEmp', 'rfc', 'nombre', 'academiaDesc'],
+      raw: true,
+    });
+
+    let pxpTeacherByNumEmp = new Map();
+    const latestPxpUpload = await findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp);
+    if (latestPxpUpload) {
+      const pxpTeacherRows = await TeacherImport.findAll({
+        where: {
+          uploadId: latestPxpUpload.id,
+          ...(schoolWherePxp || {}),
+        },
+        attributes: ['numEmp', 'rfc', 'nombre'],
+        raw: true,
+      });
+      pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
+    }
+
+    const report = buildAcademiaAgeRiskReport(mxgRows, pxpTeacherByNumEmp);
+    const appliedFilters = {
+      semNivel: filterSemNivel && mxgTableColumns.semNivel ? filterSemNivel : '',
+      academia: filterAcademia,
+      asigTipo: filterAsigTipo && mxgTableColumns.asigTipo ? filterAsigTipo : '',
+      modalidad: filterModalidad,
+      carreraDesc: filterCarreraDesc,
+    };
+
+    const lines = [
+      'Campo,Valor',
+      `Escuela seleccionada,${csvEscape(activeSchool.label)}`,
+      `Filtro Sem/Nivel,${csvEscape(appliedFilters.semNivel)}`,
+      `Filtro academia,${csvEscape(appliedFilters.academia)}`,
+      `Filtro tipo de asignatura,${csvEscape(appliedFilters.asigTipo)}`,
+      `Filtro modalidad,${csvEscape(appliedFilters.modalidad)}`,
+      `Filtro carrera,${csvEscape(appliedFilters.carreraDesc)}`,
+      `Edad avanzada desde,${csvEscape(report.seniorAgeThreshold)}`,
+      `Relevo joven menor de,${csvEscape(report.youngAgeThreshold)}`,
+      `Total academias,${csvEscape(report.totalAcademias)}`,
+      `Academias con riesgo alto,${csvEscape(report.academiasConRiesgoAlto)}`,
+      `Academias con riesgo medio,${csvEscape(report.academiasConRiesgoMedio)}`,
+      `Docentes con edad calculada,${csvEscape(report.totalDocentesConEdad)}`,
+      '',
+      'Tipo,Academia,Riesgo,Docente,Numero de empleado,RFC,Edad,Total docentes,Con edad,Sin edad,Edad promedio,Menor edad,Mayor edad,Docentes edad avanzada,Docentes relevo joven',
+    ];
+
+    for (const item of report.teacherAgesForChart) {
+      lines.push([
+        csvEscape('DOCENTE'),
+        csvEscape(item.academiaDesc || ''),
+        csvEscape(''),
+        csvEscape(item.docente || ''),
+        csvEscape(item.numEmp || ''),
+        csvEscape(item.rfc || ''),
+        csvEscape(item.edad || ''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+      ].join(','));
+    }
+
+    for (const item of report.rows) {
+      lines.push([
+        csvEscape('ACADEMIA'),
+        csvEscape(item.academiaDesc || ''),
+        csvEscape(item.riskLevel || ''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(''),
+        csvEscape(item.totalDocentes),
+        csvEscape(item.docentesConEdad),
+        csvEscape(item.docentesSinEdad),
+        csvEscape(item.averageAge !== null ? item.averageAge.toFixed(1) : ''),
+        csvEscape(item.youngestAge !== null ? item.youngestAge : ''),
+        csvEscape(item.oldestAge !== null ? item.oldestAge : ''),
+        csvEscape(item.seniorCount),
+        csvEscape(item.youngCount),
+      ].join(','));
+    }
+
+    const fileName = `edades_riesgo_academias_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(`\uFEFF${lines.join('\n')}`);
+  } catch (error) {
+    setFlash(req, 'error', `No se pudo exportar CSV de edades por academia: ${error.message}`);
+    return res.redirect('/analista/analitica');
+  }
+}
+
 async function exportMxgRuaaOverlapCsv(req, res) {
   try {
     const schoolOptions = await getSchoolOptionsFromMxg();
@@ -2728,6 +3044,7 @@ module.exports = {
   exportLabDominanceCsv,
   exportTheoryLabCoverageCsv,
   exportMxgNeedsHoursWithoutHistCsv,
+  exportAcademiaAgeRiskCsv,
   exportMxgRuaaOverlapCsv,
   escuelaDashboard,
 };
