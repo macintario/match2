@@ -1137,6 +1137,158 @@ function resolveActiveSchool(req, schoolOptions) {
   };
 }
 
+function buildTeacherUniqueKey(row) {
+  const numEmp = normalizeNumEmpComparable(row?.numEmp);
+  const rfc = String(row?.rfc || '').trim().toUpperCase();
+  const nombre = String(row?.nombre || '').trim().toUpperCase();
+  return [numEmp, rfc, nombre].join('|');
+}
+
+function countUniqueTeachers(rows) {
+  const unique = new Set();
+  for (const row of rows || []) {
+    const key = buildTeacherUniqueKey(row);
+    if (key === '||') {
+      continue;
+    }
+    unique.add(key);
+  }
+  return unique.size;
+}
+
+function detectSchoolFromPrompt(prompt, schoolOptions) {
+  const normalizedPrompt = normalizeText(prompt);
+  if (!normalizedPrompt) {
+    return null;
+  }
+
+  let bestMatch = null;
+  let bestLength = 0;
+
+  for (const school of schoolOptions || []) {
+    const candidates = [school.label, school.plantelDesc, school.plantelId]
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+      .filter((item) => item.length >= 4 || item.includes('cecyt'));
+
+    for (const candidate of candidates) {
+      if (!normalizedPrompt.includes(candidate)) {
+        continue;
+      }
+
+      if (candidate.length > bestLength) {
+        bestLength = candidate.length;
+        bestMatch = school;
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+async function buildAiSchoolDataContext(activeSchool) {
+  if (!activeSchool) {
+    return null;
+  }
+
+  const schoolWhereMxg = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDesc');
+  const schoolWherePxp = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantel');
+  const schoolWhereHistorico = buildSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc, 'plantelId', 'plantelDescripcion');
+  const schoolWhereRuaa = buildRuaaSchoolWhere(activeSchool.plantelId, activeSchool.plantelDesc);
+
+  const [latestMxgUpload, latestPxpUpload, latestHistoricoUpload, latestRuaaUpload] = await Promise.all([
+    findLatestUploadForSchool('MXG', MxgScheduleImport, schoolWhereMxg),
+    findLatestUploadForSchool('PXP', TeacherImport, schoolWherePxp),
+    findLatestUploadForSchool('HISTORICO', HistoricalSubjectImport, schoolWhereHistorico),
+    findLatestUploadForSchool('RUAA', RuaaScheduleImport, schoolWhereRuaa),
+  ]);
+
+  let pxpTeacherRows = [];
+  let mxgTeacherRows = [];
+  let historicoTeacherRows = [];
+  let ruaaTeacherRows = [];
+  let tecnicoDocentesConCarga = 0;
+
+  if (latestPxpUpload) {
+    pxpTeacherRows = await TeacherImport.findAll({
+      where: {
+        uploadId: latestPxpUpload.id,
+        ...(schoolWherePxp || {}),
+      },
+      attributes: ['numEmp', 'rfc', 'nombre', 'dictamen'],
+      raw: true,
+    });
+  }
+
+  if (latestMxgUpload) {
+    mxgTeacherRows = await MxgScheduleImport.findAll({
+      where: {
+        uploadId: latestMxgUpload.id,
+        ...(schoolWhereMxg || {}),
+      },
+      attributes: ['numEmp', 'rfc', 'nombre', 'plaza', 'hrsFtg', 'hrsNecesarias'],
+      raw: true,
+    });
+
+    const categoryInfo = await loadCategorySimpleMap();
+    const tecnicoReport = buildTecnicosDocentesConCargaReport({
+      mxgRows: mxgTeacherRows,
+      pxpTeachers: pxpTeacherRows,
+      categorySimpleByCve: categoryInfo.byCve,
+      categorySourceAvailable: categoryInfo.sourceAvailable,
+      categorySourceError: categoryInfo.sourceError,
+    });
+    tecnicoDocentesConCarga = Number(tecnicoReport.totalDocentes || 0);
+  }
+
+  if (latestHistoricoUpload) {
+    historicoTeacherRows = await HistoricalSubjectImport.findAll({
+      where: {
+        uploadId: latestHistoricoUpload.id,
+        ...(schoolWhereHistorico || {}),
+      },
+      attributes: ['numEmp', 'rfc', 'nombre'],
+      raw: true,
+    });
+  }
+
+  if (latestRuaaUpload) {
+    ruaaTeacherRows = await RuaaScheduleImport.findAll({
+      where: {
+        uploadId: latestRuaaUpload.id,
+        ...(schoolWhereRuaa || {}),
+      },
+      attributes: ['numEmp', 'rfc', 'nombre'],
+      raw: true,
+    });
+  }
+
+  return {
+    schoolLabel: activeSchool.label,
+    pxp: {
+      hasData: Boolean(latestPxpUpload),
+      totalRegistros: pxpTeacherRows.length,
+      totalDocentesUnicos: countUniqueTeachers(pxpTeacherRows),
+    },
+    mxg: {
+      hasData: Boolean(latestMxgUpload),
+      totalRegistros: mxgTeacherRows.length,
+      totalDocentesUnicos: countUniqueTeachers(mxgTeacherRows),
+      totalTecnicosDocentesConCarga: tecnicoDocentesConCarga,
+    },
+    historico: {
+      hasData: Boolean(latestHistoricoUpload),
+      totalRegistros: historicoTeacherRows.length,
+      totalDocentesUnicos: countUniqueTeachers(historicoTeacherRows),
+    },
+    ruaa: {
+      hasData: Boolean(latestRuaaUpload),
+      totalRegistros: ruaaTeacherRows.length,
+      totalDocentesUnicos: countUniqueTeachers(ruaaTeacherRows),
+    },
+  };
+}
+
 async function getSchoolOptionsFromMxg() {
   const rows = await MxgScheduleImport.findAll({
     attributes: ['plantelId', 'plantelDesc'],
@@ -2808,6 +2960,23 @@ async function analistaUploadPage(req, res) {
   });
 }
 
+async function analistaAiPage(req, res) {
+  const schoolOptions = await getSchoolOptionsFromMxg();
+  const { activeSchoolKey, activeSchool } = resolveActiveSchool(req, schoolOptions);
+
+  const aiDataContext = activeSchool
+    ? await buildAiSchoolDataContext(activeSchool)
+    : null;
+
+  return res.render('analista-ia', {
+    title: 'Consulta de datos con IA',
+    schoolOptions,
+    activeSchoolKey,
+    activeSchoolLabel: activeSchool?.label || '',
+    aiDataContext,
+  });
+}
+
 async function uploadAnalistaXml(req, res) {
   try {
     if (!req.file) {
@@ -3221,6 +3390,14 @@ async function aiPrompt(req, res) {
       return res.status(400).json({ error: 'El prompt no puede estar vacío' });
     }
 
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchool } = resolveActiveSchool(req, schoolOptions);
+    const detectedSchool = detectSchoolFromPrompt(prompt, schoolOptions);
+    const targetSchool = detectedSchool || activeSchool;
+    const schoolDataContext = targetSchool
+      ? await buildAiSchoolDataContext(targetSchool)
+      : null;
+
     // Build context from session data
     const uploadReport = req.session.analistaReportePxp || {};
     const mxgReport = req.session.analistaReporteMxg || {};
@@ -3249,10 +3426,21 @@ async function aiPrompt(req, res) {
       contextParts.push(`RUAA: Total clases: ${ruaaReport.summary.totalClases}, Total docentes: ${ruaaReport.summary.totalDocentes}`);
     }
 
+    if (schoolDataContext) {
+      contextParts.push([
+        `Escuela de referencia: ${schoolDataContext.schoolLabel}.`,
+        `Docentes cargados en PxP (unicos): ${schoolDataContext.pxp.totalDocentesUnicos}.`,
+        `Docentes en MXG (unicos): ${schoolDataContext.mxg.totalDocentesUnicos}.`,
+        `Tecnicos docentes con carga en MXG: ${schoolDataContext.mxg.totalTecnicosDocentesConCarga}.`,
+        `Docentes en HISTORICO (unicos): ${schoolDataContext.historico.totalDocentesUnicos}.`,
+        `Docentes en RUAA (unicos): ${schoolDataContext.ruaa.totalDocentesUnicos}.`,
+      ].join(' '));
+    }
+
     const contextStr = contextParts.join('. ');
     const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.
 ${contextStr ? `Contexto disponible: ${contextStr}` : ''}
-Proporciona respuestas claras y concisas sobre los datos.`;
+Responde en español con datos concretos. Si te piden conteos de docentes o tecnicos docentes, usa primero los valores del contexto disponible y aclara la escuela de referencia.`;
 
     // Call Ollama API using native fetch
     try {
@@ -3291,6 +3479,7 @@ module.exports = {
   redirectByRole,
   analistaDashboard,
   analistaAnalyticsPage,
+  analistaAiPage,
   analistaProposalsPage,
   analistaUploadPage,
   uploadAnalistaXml,

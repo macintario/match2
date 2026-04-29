@@ -1,0 +1,136 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<main class="main-content">
+  <section class="card">
+    <div class="row-between">
+      <div>
+        <h1>Consulta de datos con IA</h1>
+        <p>Haz preguntas sobre los datos cargados por escuela.</p>
+      </div>
+      <a href="<%= basePath %>/analista" class="btn btn-secondary">Volver al panel</a>
+    </div>
+
+    <form method="GET" action="<%= basePath %>/analista/ia" style="margin:0.75rem 0 1rem 0; display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap;">
+      <div style="display:flex; flex-direction:column; gap:0.25rem;">
+        <label for="school-key" style="font-size:0.85rem; font-weight:600; color:#555;">Escuela de trabajo</label>
+        <select id="school-key" name="schoolKey" class="form-control" style="min-width:280px;" <%= !schoolOptions || schoolOptions.length === 0 ? 'disabled' : '' %>>
+          <% if (!schoolOptions || schoolOptions.length === 0) { %>
+            <option value="">No hay escuelas disponibles</option>
+          <% } %>
+          <% (schoolOptions || []).forEach(function(opt) { %>
+            <option value="<%= opt.key %>" <%= activeSchoolKey === opt.key ? 'selected' : '' %>><%= opt.label %></option>
+          <% }) %>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary" <%= !schoolOptions || schoolOptions.length === 0 ? 'disabled' : '' %>>Cambiar escuela</button>
+    </form>
+
+    <% if (activeSchoolLabel) { %>
+      <p><strong>Escuela activa:</strong> <%= activeSchoolLabel %></p>
+    <% } else { %>
+      <p style="color:#8a6d3b;">Selecciona una escuela para consultar sus datos con IA.</p>
+    <% } %>
+
+    <% if (aiDataContext) { %>
+      <div class="feature-list" style="margin-top:0.75rem; margin-bottom:1rem;">
+        <div class="feature-item">
+          <strong>PxP</strong>: <%= aiDataContext.pxp.totalDocentesUnicos %> docentes unicos.
+        </div>
+        <div class="feature-item">
+          <strong>MXG</strong>: <%= aiDataContext.mxg.totalDocentesUnicos %> docentes unicos. Tecnicos docentes con carga: <%= aiDataContext.mxg.totalTecnicosDocentesConCarga %>.
+        </div>
+      </div>
+    <% } %>
+
+    <p style="margin:0 0 0.6rem 0;"><strong>Ejemplos:</strong></p>
+    <ul style="margin-top:0; padding-left:1.1rem;">
+      <li>Cuantos docentes estan cargados?</li>
+      <li>Cuantos tecnicos docentes tiene el CECyT 1?</li>
+      <li>Cuantos docentes hay en MXG para la escuela activa?</li>
+    </ul>
+
+    <div class="ai-chat">
+      <div class="ai-chat-header">Consulta IA</div>
+      <div class="ai-chat-messages" id="ai-messages"></div>
+      <form class="ai-chat-input" id="ai-chat-form">
+        <textarea
+          id="ai-prompt-input"
+          placeholder="Haz una pregunta sobre los datos cargados..."
+          maxlength="1000"
+          rows="1"
+          required></textarea>
+        <button type="submit" class="btn btn-primary ai-chat-send-btn">
+          <span class="btn-label">Enviar</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+    </div>
+  </section>
+</main>
+
+<script>
+  (function () {
+    const chatForm = document.getElementById('ai-chat-form');
+    const messagesDiv = document.getElementById('ai-messages');
+    const promptInput = document.getElementById('ai-prompt-input');
+    const sendBtn = chatForm ? chatForm.querySelector('button[type="submit"]') : null;
+    const schoolSelect = document.getElementById('school-key');
+
+    function appendMessage(className, text) {
+      const message = document.createElement('div');
+      message.className = className;
+      message.textContent = text;
+      messagesDiv.appendChild(message);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    if (!chatForm || !sendBtn) {
+      return;
+    }
+
+    chatForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      const prompt = promptInput.value.trim();
+      if (!prompt) {
+        return;
+      }
+
+      appendMessage('ai-message ai-message-user', prompt);
+      promptInput.value = '';
+
+      sendBtn.disabled = true;
+      sendBtn.classList.add('is-loading');
+
+      try {
+        const response = await fetch('<%= basePath %>/analista/ai-prompt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt,
+            schoolKey: schoolSelect ? schoolSelect.value : '',
+          }),
+        });
+
+        const data = await response.json().catch(function () { return {}; });
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Error en la respuesta del servidor');
+        }
+
+        appendMessage('ai-message ai-message-bot', data.response || 'No se pudo procesar la respuesta');
+      } catch (error) {
+        appendMessage('ai-message ai-message-bot', 'Error al conectar con la IA: ' + error.message);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.classList.remove('is-loading');
+        promptInput.focus();
+      }
+    });
+  })();
+</script>
+
+<%- include('partials/foot') %>
