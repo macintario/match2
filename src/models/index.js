@@ -7,6 +7,7 @@ const HistoricalSubjectImport = require('./HistoricalSubjectImport');
 const RuaaScheduleImport = require('./RuaaScheduleImport');
 const MxgScheduleImport = require('./MxgScheduleImport');
 const SubstitutionProposal = require('./SubstitutionProposal');
+const Categ = require('./Categ')(sequelize);
 
 User.hasMany(XmlUpload, { foreignKey: 'userId' });
 XmlUpload.belongsTo(User, { foreignKey: 'userId' });
@@ -39,4 +40,5 @@ module.exports = {
   RuaaScheduleImport,
   MxgScheduleImport,
   SubstitutionProposal,
+  Categ,
 };

@@ -10,7 +10,7 @@ const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const { sequelize } = require('./models');
-const { normalizeMissingUsernames, ensureAdminUser } = require('./services/bootstrap');
+const { normalizeMissingUsernames, ensureAdminUser, ensureCategoryTable } = require('./services/bootstrap');
 
 const app = express();
 const BASE_PATH = (process.env.APP_BASE_PATH || '/match2').replace(/\/$/, '');
@@ -247,6 +247,7 @@ async function start() {
     await ensureSchemaCompatibility();
     await normalizeMissingUsernames();
     await ensureAdminUser();
+    await ensureCategoryTable(sequelize);
 
     app.listen(PORT, () => {
       console.log(`Servidor iniciado en http://localhost:${PORT}${BASE_PATH}`);
