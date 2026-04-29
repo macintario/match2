@@ -83,6 +83,13 @@ router.post(
 	express.urlencoded({ extended: false }),
 	dashboardController.updateProposalStatus
 );
+router.post(
+	'/analista/ai-prompt',
+	ensureAuth,
+	requireRole(['analista']),
+	express.json(),
+	dashboardController.aiPrompt
+);
 router.get('/escuela', ensureAuth, requireRole(['escuela']), dashboardController.escuelaDashboard);
 
 module.exports = router;

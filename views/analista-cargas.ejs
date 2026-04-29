@@ -444,6 +444,24 @@
         </div>
       <% } %>
     <% } %>
+
+    <!-- AI Chat Section -->
+    <div class="ai-chat">
+      <div class="ai-chat-header">💬 Consulta de datos con IA</div>
+      <div class="ai-chat-messages" id="ai-messages"></div>
+      <form class="ai-chat-input" id="ai-chat-form">
+        <textarea 
+          id="ai-prompt-input" 
+          placeholder="Haz una pregunta sobre los datos cargados..." 
+          maxlength="1000"
+          rows="1"
+          required></textarea>
+        <button type="submit" class="btn btn-primary ai-chat-send-btn">
+          <span class="btn-label">Enviar</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+    </div>
   </section>
 </main>
 
@@ -463,6 +481,67 @@
         submitButton.setAttribute('aria-busy', 'true');
       });
     });
+
+    // AI Chat functionality
+    const chatForm = document.getElementById('ai-chat-form');
+    const messagesDiv = document.getElementById('ai-messages');
+    const promptInput = document.getElementById('ai-prompt-input');
+    const sendBtn = chatForm.querySelector('button[type="submit"]');
+
+    if (chatForm) {
+      chatForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const prompt = promptInput.value.trim();
+        if (!prompt) return;
+
+        // Add user message to chat
+        const userMessage = document.createElement('div');
+        userMessage.className = 'ai-message ai-message-user';
+        userMessage.textContent = prompt;
+        messagesDiv.appendChild(userMessage);
+        promptInput.value = '';
+
+        // Show loading state
+        sendBtn.disabled = true;
+        sendBtn.classList.add('is-loading');
+
+        try {
+          // Call backend endpoint
+          const response = await fetch('<%= basePath %>/analista/ai-prompt', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt }),
+          });
+
+          if (!response.ok) {
+            throw new Error('Error en la respuesta del servidor');
+          }
+
+          const data = await response.json();
+
+          // Add bot message to chat
+          const botMessage = document.createElement('div');
+          botMessage.className = 'ai-message ai-message-bot';
+          botMessage.textContent = data.response || 'No se pudo procesar la respuesta';
+          messagesDiv.appendChild(botMessage);
+
+          // Scroll to bottom
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        } catch (error) {
+          const errorMessage = document.createElement('div');
+          errorMessage.className = 'ai-message ai-message-bot';
+          errorMessage.textContent = 'Error al conectar con la IA: ' + error.message;
+          messagesDiv.appendChild(errorMessage);
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.classList.remove('is-loading');
+          promptInput.focus();
+        }
+      });
+    }
   })();
 </script>
 

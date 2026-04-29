@@ -3213,6 +3213,80 @@ function escuelaDashboard(req, res) {
   });
 }
 
+async function aiPrompt(req, res) {
+  try {
+    const { prompt } = req.body || {};
+
+    if (!prompt || String(prompt).trim().length === 0) {
+      return res.status(400).json({ error: 'El prompt no puede estar vacío' });
+    }
+
+    // Build context from session data
+    const uploadReport = req.session.analistaReportePxp || {};
+    const mxgReport = req.session.analistaReporteMxg || {};
+    const historicoReport = req.session.analistaHistoricoReport || {};
+    const ruaaReport = req.session.analistaReportRuaa || {};
+
+    const contextParts = [];
+
+    // Add upload summary
+    if (uploadReport.summary) {
+      contextParts.push(`PxP: Total docentes: ${uploadReport.summary.totalDocentes}, Total plazas: ${uploadReport.summary.totalPlazas}`);
+    }
+
+    // Add MXG summary
+    if (mxgReport.summary) {
+      contextParts.push(`MXG: Total registros: ${mxgReport.summary.totalRegistros}, Solicitudes adicionales: ${mxgReport.summary.totalSolicitudesAdicionales}, Horas solicitadas: ${mxgReport.summary.totalHorasSolicitadas}`);
+    }
+
+    // Add HISTORICO summary
+    if (historicoReport.summary) {
+      contextParts.push(`HISTORICO: Total asignaturas: ${historicoReport.summary.totalAsignaturas}, Total docentes: ${historicoReport.summary.totalDocentes}`);
+    }
+
+    // Add RUAA summary
+    if (ruaaReport.summary) {
+      contextParts.push(`RUAA: Total clases: ${ruaaReport.summary.totalClases}, Total docentes: ${ruaaReport.summary.totalDocentes}`);
+    }
+
+    const contextStr = contextParts.join('. ');
+    const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.
+${contextStr ? `Contexto disponible: ${contextStr}` : ''}
+Proporciona respuestas claras y concisas sobre los datos.`;
+
+    // Call Ollama API using native fetch
+    try {
+      const ollamaResponse = await fetch('http://148.204.112.157:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3',
+          prompt: prompt,
+          system: systemPrompt,
+          stream: false,
+        }),
+      });
+
+      if (!ollamaResponse.ok) {
+        const errorText = await ollamaResponse.text();
+        console.error('Ollama error:', errorText);
+        return res.status(500).json({ error: 'Error al consultar la IA: ' + errorText });
+      }
+
+      const data = await ollamaResponse.json();
+      const aiResponse = data.response || 'Sin respuesta';
+
+      return res.json({ response: aiResponse });
+    } catch (fetchError) {
+      console.error('Fetch error:', fetchError);
+      return res.status(500).json({ error: `Error conectando con IA: ${fetchError.message}` });
+    }
+  } catch (error) {
+    console.error('AI prompt error:', error);
+    return res.status(500).json({ error: `Error procesando prompt: ${error.message}` });
+  }
+}
+
 module.exports = {
   redirectByRole,
   analistaDashboard,
@@ -3232,4 +3306,5 @@ module.exports = {
   exportAcademiaAgeRiskCsv,
   exportMxgRuaaOverlapCsv,
   escuelaDashboard,
+  aiPrompt,
 };
