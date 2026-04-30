@@ -3382,6 +3382,74 @@ function escuelaDashboard(req, res) {
   });
 }
 
+/**
+ * Intenta responder preguntas frecuentes directamente con datos de la BD,
+ * sin llamar a la IA. Retorna string con la respuesta o null si no aplica.
+ */
+function buildDeterministicResponse(prompt, schoolDataContext, targetSchool) {
+  const q = normalizeText(prompt);
+  const schoolLabel = schoolDataContext ? schoolDataContext.schoolLabel : null;
+  const ref = schoolLabel ? ` en **${schoolLabel}**` : '';
+
+  // Helpers para verificar si la pregunta menciona una fuente específica
+  const mentionsMxg = /\b(mxg|carga horaria|horario)\b/.test(q);
+  const mentionsHist = /\b(hist(orico)?|historico)\b/.test(q);
+  const mentionsRuaa = /\bruaa\b/.test(q);
+  const mentionsPxp = /\bpxp\b/.test(q);
+  const mentionsTecnico = /tecnico(s)? docente(s)?|tecnico-docente(s)?/.test(q);
+  const mentionsDocente = /\bdocente(s)?\b/.test(q);
+  const mentionsCuantos = /\b(cuantos|cuantas|cuanto|total|numero|cantidad)\b/.test(q);
+
+  if (!mentionsCuantos && !mentionsDocente) return null;
+
+  if (!schoolDataContext) {
+    // Sin contexto de escuela no podemos dar cifras exactas
+    if (mentionsCuantos && mentionsDocente) {
+      return 'No hay una escuela activa seleccionada. Por favor elige una escuela en el selector para obtener cifras exactas.';
+    }
+    return null;
+  }
+
+  const { pxp, mxg, historico, ruaa } = schoolDataContext;
+
+  // ¿Cuántos técnicos docentes?
+  if (mentionsTecnico) {
+    return `Hay **${mxg.totalTecnicosDocentesConCarga}** técnico(s) docente(s) con carga registrada en MXG${ref}.`;
+  }
+
+  // ¿Cuántos docentes en RUAA?
+  if (mentionsRuaa && mentionsDocente) {
+    return `Hay **${ruaa.totalDocentesUnicos}** docente(s) únicos registrados en RUAA${ref}.`;
+  }
+
+  // ¿Cuántos docentes en HISTÓRICO?
+  if (mentionsHist && mentionsDocente) {
+    return `Hay **${historico.totalDocentesUnicos}** docente(s) únicos registrados en el Histórico${ref}.`;
+  }
+
+  // ¿Cuántos docentes en MXG / carga horaria?
+  if (mentionsMxg && mentionsDocente) {
+    return `Hay **${mxg.totalDocentesUnicos}** docente(s) únicos con carga registrada en MXG${ref}.`;
+  }
+
+  // ¿Cuántos docentes están cargados? (PxP por defecto o mención explícita)
+  if (mentionsDocente && mentionsCuantos) {
+    if (mentionsPxp) {
+      return `Hay **${pxp.totalDocentesUnicos}** docente(s) únicos cargados en PxP${ref}.`;
+    }
+    // Respuesta combinada
+    return [
+      `Resumen de docentes${ref}:`,
+      `- **PxP**: ${pxp.totalDocentesUnicos} docentes únicos`,
+      `- **MXG**: ${mxg.totalDocentesUnicos} docentes únicos (${mxg.totalTecnicosDocentesConCarga} técnicos docentes)`,
+      `- **Histórico**: ${historico.totalDocentesUnicos} docentes únicos`,
+      `- **RUAA**: ${ruaa.totalDocentesUnicos} docentes únicos`,
+    ].join('\n');
+  }
+
+  return null;
+}
+
 async function aiPrompt(req, res) {
   try {
     const { prompt } = req.body || {};
@@ -3441,6 +3509,12 @@ async function aiPrompt(req, res) {
     const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.
 ${contextStr ? `Contexto disponible: ${contextStr}` : ''}
 Responde en español con datos concretos. Si te piden conteos de docentes o tecnicos docentes, usa primero los valores del contexto disponible y aclara la escuela de referencia.`;
+
+    // --- Respuestas deterministas para preguntas frecuentes ---
+    const deterministicResponse = buildDeterministicResponse(prompt, schoolDataContext, targetSchool);
+    if (deterministicResponse) {
+      return res.json({ response: deterministicResponse });
+    }
 
     // Call Ollama API using native fetch
     try {
