@@ -51,7 +51,7 @@ const PositionImport = sequelize.define(
     },
   },
   {
-    tableName: 'position_imports',
+    tableName: 'Plazas',
     updatedAt: false,
   }
 );

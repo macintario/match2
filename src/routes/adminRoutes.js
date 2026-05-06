@@ -8,13 +8,13 @@ const router = express.Router();
 
 router.use(ensureAuth, requireRole(['admin']));
 
-// Ruta de debug para verificar estado de CATEG table
+// Ruta de debug para verificar estado de CATALOGO_CATEGORIAS
 router.get('/debug/categ-status', async (req, res) => {
   try {
-    const count = await sequelize.query('SELECT COUNT(*) as count FROM CATEG', {
+    const count = await sequelize.query('SELECT COUNT(*) as count FROM CATALOGO_CATEGORIAS', {
       type: QueryTypes.SELECT,
     });
-    const data = await sequelize.query('SELECT * FROM CATEG LIMIT 10', {
+    const data = await sequelize.query('SELECT * FROM CATALOGO_CATEGORIAS LIMIT 10', {
       type: QueryTypes.SELECT,
     });
     

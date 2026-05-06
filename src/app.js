@@ -135,8 +135,23 @@ async function ensureSchemaCompatibility() {
       });
     }
 
-    // teacher_imports new columns
-    const teacherColumns = await queryInterface.describeTable('teacher_imports').catch(() => null);
+    // docentes (legacy: teacher_imports) new columns
+    const allTables = await queryInterface.showAllTables();
+    const normalizedTables = (allTables || []).map((item) => {
+      if (typeof item === 'string') {
+        return item.toLowerCase();
+      }
+      return String(item.tableName || item.TABLE_NAME || '').toLowerCase();
+    });
+
+    const hasDocentesTable = normalizedTables.includes('docentes');
+    const hasTeacherImportsTable = normalizedTables.includes('teacher_imports');
+
+    if (!hasDocentesTable && hasTeacherImportsTable) {
+      await sequelize.query('RENAME TABLE teacher_imports TO docentes');
+    }
+
+    const teacherColumns = await queryInterface.describeTable('docentes').catch(() => null);
     if (teacherColumns) {
       const teacherNewCols = {
         horasNomDist: DataTypes.STRING(20),
@@ -159,7 +174,7 @@ async function ensureSchemaCompatibility() {
       };
       for (const [colName, colType] of Object.entries(teacherNewCols)) {
         if (!teacherColumns[colName]) {
-          await queryInterface.addColumn('teacher_imports', colName, {
+          await queryInterface.addColumn('docentes', colName, {
             type: colType,
             allowNull: true,
             defaultValue: null,
@@ -168,8 +183,23 @@ async function ensureSchemaCompatibility() {
       }
     }
 
-    // position_imports new columns
-    const positionColumns = await queryInterface.describeTable('position_imports').catch(() => null);
+    // Plazas (legacy: position_imports) new columns
+    const allTablesAfterTeacher = await queryInterface.showAllTables();
+    const normalizedTablesAfterTeacher = (allTablesAfterTeacher || []).map((item) => {
+      if (typeof item === 'string') {
+        return item.toLowerCase();
+      }
+      return String(item.tableName || item.TABLE_NAME || '').toLowerCase();
+    });
+
+    const hasPlazasTable = normalizedTablesAfterTeacher.includes('plazas');
+    const hasPositionImportsTable = normalizedTablesAfterTeacher.includes('position_imports');
+
+    if (!hasPlazasTable && hasPositionImportsTable) {
+      await sequelize.query('RENAME TABLE position_imports TO Plazas');
+    }
+
+    const positionColumns = await queryInterface.describeTable('Plazas').catch(() => null);
     if (positionColumns) {
       const positionNewCols = {
         status: DataTypes.STRING(10),
@@ -178,7 +208,7 @@ async function ensureSchemaCompatibility() {
       };
       for (const [colName, colType] of Object.entries(positionNewCols)) {
         if (!positionColumns[colName]) {
-          await queryInterface.addColumn('position_imports', colName, {
+          await queryInterface.addColumn('Plazas', colName, {
             type: colType,
             allowNull: true,
             defaultValue: null,

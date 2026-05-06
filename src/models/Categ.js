@@ -3,7 +3,7 @@ const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
   const Categ = sequelize.define('Categ', {
-    CVE: {
+    CLAVE: {
       type: DataTypes.STRING(100),
       allowNull: false,
       primaryKey: true,
@@ -25,7 +25,7 @@ module.exports = (sequelize) => {
       allowNull: true,
     },
   }, {
-    tableName: 'CATEG',
+    tableName: 'CATALOGO_CATEGORIAS',
     timestamps: false,
     underscored: false,
   });

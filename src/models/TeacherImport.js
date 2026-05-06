@@ -131,7 +131,7 @@ const TeacherImport = sequelize.define(
     },
   },
   {
-    tableName: 'teacher_imports',
+    tableName: 'docentes',
     updatedAt: false,
   }
 );

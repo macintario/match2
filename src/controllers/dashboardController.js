@@ -872,13 +872,13 @@ function splitCategoryCodes(rawValue) {
 
 async function loadCategorySimpleMap() {
   try {
-    const rows = await sequelize.query('SELECT CVE, CAT_SIMPLE FROM CATEG', {
+    const rows = await sequelize.query('SELECT CLAVE, CAT_SIMPLE FROM CATALOGO_CATEGORIAS', {
       type: QueryTypes.SELECT,
     });
 
     const byCve = new Map();
     for (const row of rows || []) {
-      const cve = normalizeCategoryKey(row.CVE || row.cve);
+      const cve = normalizeCategoryKey(row.CLAVE || row.clave || row.CVE || row.cve);
       if (!cve) {
         continue;
       }

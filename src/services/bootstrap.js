@@ -75,11 +75,15 @@ async function ensureAdminUser() {
 }
 
 /**
- * Asegura que la tabla CATEG exista y contenga datos iniciales.
+ * Asegura que la tabla CATALOGO_CATEGORIAS exista y contenga datos iniciales.
+ * Si encuentra el esquema legado (CATEG / CVE), lo migra en sitio.
  * Se ejecuta durante el bootstrap de la aplicación.
  */
 async function ensureCategoryTable(sequelize) {
-  const tableName = 'CATEG';
+  const legacyTableName = 'CATEG';
+  const tableName = 'CATALOGO_CATEGORIAS';
+  const legacyPrimaryColumn = 'CVE';
+  const primaryColumn = 'CLAVE';
   
   try {
     // Verificar si la tabla existe
@@ -91,10 +95,18 @@ async function ensureCategoryTable(sequelize) {
       return String(item.tableName || item.TABLE_NAME || '').toLowerCase();
     });
 
-    if (!normalized.includes(tableName.toLowerCase())) {
+    const hasLegacyTable = normalized.includes(legacyTableName.toLowerCase());
+    const hasTargetTable = normalized.includes(tableName.toLowerCase());
+
+    if (hasLegacyTable && !hasTargetTable) {
+      await sequelize.query(`RENAME TABLE ${legacyTableName} TO ${tableName}`);
+      console.log(`✅ Tabla ${legacyTableName} renombrada a ${tableName}.`);
+    }
+
+    if (!hasLegacyTable && !hasTargetTable) {
       // Crear la tabla con todas las columnas
       await sequelize.getQueryInterface().createTable(tableName, {
-        CVE: {
+        CLAVE: {
           type: DataTypes.STRING(100),
           allowNull: false,
           primaryKey: true,
@@ -120,11 +132,52 @@ async function ensureCategoryTable(sequelize) {
       console.log(`✅ Tabla ${tableName} creada exitosamente.`);
 
       if (Array.isArray(categCatalog) && categCatalog.length > 0) {
-        await sequelize.getQueryInterface().bulkInsert(tableName, categCatalog);
+        const initialRows = categCatalog.map((item) => ({
+          CLAVE: item.CLAVE || item.CVE || null,
+          CATEGORIA: item.CATEGORIA || null,
+          CAT_SIMPLE: item.CAT_SIMPLE || null,
+          ORD_CAT: item.ORD_CAT ?? null,
+          CT_AV: item.CT_AV ?? null,
+        }));
+
+        await sequelize.getQueryInterface().bulkInsert(tableName, initialRows);
         console.log(`✅ ${categCatalog.length} categorías iniciales insertadas en ${tableName}.`);
       }
     } else {
       console.log(`✅ Tabla ${tableName} ya existe.`);
+    }
+
+    // Asegurar el nombre de columna nuevo (CLAVE)
+    try {
+      const columns = await sequelize.getQueryInterface().describeTable(tableName);
+      const hasLegacyColumn = Object.prototype.hasOwnProperty.call(columns, legacyPrimaryColumn);
+      const hasTargetColumn = Object.prototype.hasOwnProperty.call(columns, primaryColumn);
+
+      if (hasLegacyColumn && !hasTargetColumn) {
+        await sequelize.getQueryInterface().renameColumn(tableName, legacyPrimaryColumn, primaryColumn);
+        console.log(`✅ Columna ${legacyPrimaryColumn} renombrada a ${primaryColumn} en ${tableName}.`);
+      }
+
+      // Carga inicial de respaldo cuando la tabla existe pero esta vacia.
+      const [countRows] = await sequelize.query(`SELECT COUNT(*) AS total FROM ${tableName}`);
+      const totalRows = Number(
+        (countRows && countRows[0] && (countRows[0].total ?? countRows[0].TOTAL ?? countRows[0]['COUNT(*)'])) || 0
+      );
+
+      if (totalRows === 0 && Array.isArray(categCatalog) && categCatalog.length > 0) {
+        const initialRows = categCatalog.map((item) => ({
+          CLAVE: item.CLAVE || item.CVE || null,
+          CATEGORIA: item.CATEGORIA || null,
+          CAT_SIMPLE: item.CAT_SIMPLE || null,
+          ORD_CAT: item.ORD_CAT ?? null,
+          CT_AV: item.CT_AV ?? null,
+        }));
+
+        await sequelize.getQueryInterface().bulkInsert(tableName, initialRows);
+        console.log(`✅ ${initialRows.length} categorias insertadas en ${tableName} (tabla vacia).`);
+      }
+    } catch (columnError) {
+      console.error(`⚠️  Error verificando/renombrando columnas en ${tableName}:`, columnError.message);
     }
   } catch (error) {
     console.error(`⚠️  Error asegurando tabla ${tableName}:`, error.message);
