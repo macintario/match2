@@ -1,5 +1,6 @@
 const { XMLValidator } = require('fast-xml-parser');
 const { Op, fn, col, QueryTypes } = require('sequelize');
+const schoolIndexBuilder = require('../services/schoolIndexBuilder');
 const { parsePayrollXml, parseHistoricoXml, parseRuaaXml } = require('../services/payrollXmlParser');
 const {
   parsePayrollWorkbook,
@@ -1285,6 +1286,13 @@ async function buildAiSchoolDataContext(activeSchool) {
       hasData: Boolean(latestRuaaUpload),
       totalRegistros: ruaaTeacherRows.length,
       totalDocentesUnicos: countUniqueTeachers(ruaaTeacherRows),
+    },
+    // Raw rows – used by the RAG index builder; not rendered in views
+    _rawRows: {
+      pxpRows: pxpTeacherRows,
+      mxgRows: mxgTeacherRows,
+      historicoRows: historicoTeacherRows,
+      ruaaRows: ruaaTeacherRows,
     },
   };
 }
@@ -3450,6 +3458,69 @@ function buildDeterministicResponse(prompt, schoolDataContext, targetSchool) {
   return null;
 }
 
+function detectRagIntent(prompt) {
+  const q = normalizeText(prompt);
+
+  const schemaIntent = /(columna|columnas|campo|campos|tabla|tablas|esquema|modelo|sql|tipo de dato)/.test(q);
+  const relationIntent = /(relacion|relaciones|fk|foreign key|llave foranea|pk|primary key|join|cardinalidad)/.test(q);
+  const excelIntent = /(excel|xlsx|hoja|columna excel|mapeo|alias|layout|archivo)/.test(q);
+  const dataIntent = /(dato|datos|registro|registros|docente|docentes|rfc|plaza|asignatura|mxg|ruaa|historico|pxp)/.test(q);
+
+  return { schemaIntent, relationIntent, excelIntent, dataIntent };
+}
+
+function computeChunkIntentBonus(chunk, intent, normalizedPrompt) {
+  const type = String((chunk && chunk.metadata && chunk.metadata.type) || '').toLowerCase();
+  const table = String((chunk && chunk.metadata && chunk.metadata.table) || '').toLowerCase();
+  const model = String((chunk && chunk.metadata && chunk.metadata.model) || '').toLowerCase();
+  let bonus = 0;
+
+  if (intent.schemaIntent) {
+    if (type === 'db_schema_columns') bonus += 0.35;
+    if (type === 'db_schema_summary') bonus += 0.25;
+    if (type === 'db_relationship') bonus += 0.15;
+  }
+
+  if (intent.relationIntent) {
+    if (type === 'db_relationship') bonus += 0.4;
+    if (type === 'db_schema_columns') bonus += 0.1;
+  }
+
+  if (intent.excelIntent) {
+    if (type === 'excel_mapping') bonus += 0.45;
+    if (type === 'excel_mapping_summary') bonus += 0.25;
+  }
+
+  if (intent.dataIntent) {
+    if (['pxp', 'mxg', 'historico', 'ruaa', 'db_table_samples'].includes(type)) bonus += 0.2;
+    if (type === 'summary') bonus += 0.05;
+  }
+
+  if (table && normalizedPrompt.includes(table)) bonus += 0.2;
+  if (model && normalizedPrompt.includes(model)) bonus += 0.15;
+
+  return bonus;
+}
+
+function rerankRagChunksByIntent(chunks, prompt, topK = 5) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return [];
+
+  const normalizedPrompt = normalizeText(prompt);
+  const intent = detectRagIntent(prompt);
+
+  const reranked = chunks.map((chunk) => {
+    const baseScore = Number.isFinite(chunk.score) ? chunk.score : 0;
+    const bonus = computeChunkIntentBonus(chunk, intent, normalizedPrompt);
+    return {
+      ...chunk,
+      adjustedScore: baseScore + bonus,
+    };
+  });
+
+  reranked.sort((a, b) => b.adjustedScore - a.adjustedScore);
+  return reranked.slice(0, topK);
+}
+
 async function aiPrompt(req, res) {
   try {
     const { prompt } = req.body || {};
@@ -3466,63 +3537,77 @@ async function aiPrompt(req, res) {
       ? await buildAiSchoolDataContext(targetSchool)
       : null;
 
-    // Build context from session data
-    const uploadReport = req.session.analistaReportePxp || {};
-    const mxgReport = req.session.analistaReporteMxg || {};
-    const historicoReport = req.session.analistaHistoricoReport || {};
-    const ruaaReport = req.session.analistaReportRuaa || {};
-
-    const contextParts = [];
-
-    // Add upload summary
-    if (uploadReport.summary) {
-      contextParts.push(`PxP: Total docentes: ${uploadReport.summary.totalDocentes}, Total plazas: ${uploadReport.summary.totalPlazas}`);
-    }
-
-    // Add MXG summary
-    if (mxgReport.summary) {
-      contextParts.push(`MXG: Total registros: ${mxgReport.summary.totalRegistros}, Solicitudes adicionales: ${mxgReport.summary.totalSolicitudesAdicionales}, Horas solicitadas: ${mxgReport.summary.totalHorasSolicitadas}`);
-    }
-
-    // Add HISTORICO summary
-    if (historicoReport.summary) {
-      contextParts.push(`HISTORICO: Total asignaturas: ${historicoReport.summary.totalAsignaturas}, Total docentes: ${historicoReport.summary.totalDocentes}`);
-    }
-
-    // Add RUAA summary
-    if (ruaaReport.summary) {
-      contextParts.push(`RUAA: Total clases: ${ruaaReport.summary.totalClases}, Total docentes: ${ruaaReport.summary.totalDocentes}`);
-    }
-
-    if (schoolDataContext) {
-      contextParts.push([
-        `Escuela de referencia: ${schoolDataContext.schoolLabel}.`,
-        `Docentes cargados en PxP (unicos): ${schoolDataContext.pxp.totalDocentesUnicos}.`,
-        `Docentes en MXG (unicos): ${schoolDataContext.mxg.totalDocentesUnicos}.`,
-        `Tecnicos docentes con carga en MXG: ${schoolDataContext.mxg.totalTecnicosDocentesConCarga}.`,
-        `Docentes en HISTORICO (unicos): ${schoolDataContext.historico.totalDocentesUnicos}.`,
-        `Docentes en RUAA (unicos): ${schoolDataContext.ruaa.totalDocentesUnicos}.`,
-      ].join(' '));
-    }
-
-    const contextStr = contextParts.join('. ');
-    const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.
-${contextStr ? `Contexto disponible: ${contextStr}` : ''}
-Responde en español con datos concretos. Si te piden conteos de docentes o tecnicos docentes, usa primero los valores del contexto disponible y aclara la escuela de referencia.`;
-
     // --- Respuestas deterministas para preguntas frecuentes ---
     const deterministicResponse = buildDeterministicResponse(prompt, schoolDataContext, targetSchool);
     if (deterministicResponse) {
-      return res.json({ response: deterministicResponse });
+      return res.json({ response: deterministicResponse, source: 'deterministic' });
     }
 
-    // Call Ollama API using native fetch
+    // --- RAG: buscar chunks relevantes si hay índice vectorial ---
+    let ragContext = null;
+    if (targetSchool) {
+      try {
+        const index = schoolIndexBuilder.loadIndex(targetSchool.key);
+        if (index) {
+          const rawChunks = await index.query(prompt, 12);
+          const topChunks = rerankRagChunksByIntent(rawChunks, prompt, 5);
+          if (topChunks.length > 0) {
+            ragContext = topChunks.map((c) => c.text).join('\n\n');
+          }
+        }
+      } catch (ragErr) {
+        console.warn('RAG query error (continuing without RAG):', ragErr.message);
+      }
+    }
+
+    // --- Contexto de respaldo (estadísticas de sesión + resumen) ---
+    let fallbackContext = '';
+    if (!ragContext) {
+      const contextParts = [];
+      const uploadReport = req.session.analistaReportePxp || {};
+      const mxgReport = req.session.analistaReporteMxg || {};
+      const historicoReport = req.session.analistaHistoricoReport || {};
+      const ruaaReport = req.session.analistaReportRuaa || {};
+
+      if (uploadReport.summary) {
+        contextParts.push(`PxP: Total docentes: ${uploadReport.summary.totalDocentes}, Total plazas: ${uploadReport.summary.totalPlazas}`);
+      }
+      if (mxgReport.summary) {
+        contextParts.push(`MXG: Total registros: ${mxgReport.summary.totalRegistros}, Horas solicitadas: ${mxgReport.summary.totalHorasSolicitadas}`);
+      }
+      if (historicoReport.summary) {
+        contextParts.push(`HISTORICO: Total asignaturas: ${historicoReport.summary.totalAsignaturas}, Total docentes: ${historicoReport.summary.totalDocentes}`);
+      }
+      if (ruaaReport.summary) {
+        contextParts.push(`RUAA: Total clases: ${ruaaReport.summary.totalClases}, Total docentes: ${ruaaReport.summary.totalDocentes}`);
+      }
+      if (schoolDataContext) {
+        contextParts.push([
+          `Escuela de referencia: ${schoolDataContext.schoolLabel}.`,
+          `PxP: ${schoolDataContext.pxp.totalDocentesUnicos} docentes únicos.`,
+          `MXG: ${schoolDataContext.mxg.totalDocentesUnicos} docentes únicos, ${schoolDataContext.mxg.totalTecnicosDocentesConCarga} técnicos docentes.`,
+          `Histórico: ${schoolDataContext.historico.totalDocentesUnicos} docentes únicos.`,
+          `RUAA: ${schoolDataContext.ruaa.totalDocentesUnicos} docentes únicos.`,
+        ].join(' '));
+      }
+      fallbackContext = contextParts.join('. ');
+    }
+
+    const contextBlock = ragContext
+      ? `Fragmentos de datos relevantes (recuperados por búsqueda semántica):\n${ragContext}`
+      : (fallbackContext ? `Contexto disponible: ${fallbackContext}` : '');
+
+    const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.\n${contextBlock}\nResponde en español con datos concretos. Basa tu respuesta exclusivamente en el contexto proporcionado.`;
+
+    // --- Llamada a Ollama ---
     try {
-      const ollamaResponse = await fetch('http://148.204.112.157:11434/api/generate', {
+      const ollamaBase = process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:11434';
+      const ollamaModel = process.env.OLLAMA_MODEL || 'qwen2.5:14b';
+      const ollamaResponse = await fetch(`${ollamaBase}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'deepseek-v2:16b',
+          model: ollamaModel,
           prompt: prompt,
           system: systemPrompt,
           stream: false,
@@ -3537,8 +3622,10 @@ Responde en español con datos concretos. Si te piden conteos de docentes o tecn
 
       const data = await ollamaResponse.json();
       const aiResponse = data.response || 'Sin respuesta';
-
-      return res.json({ response: aiResponse });
+      return res.json({
+        response: aiResponse,
+        source: ragContext ? 'rag' : 'summary',
+      });
     } catch (fetchError) {
       console.error('Fetch error:', fetchError);
       return res.status(500).json({ error: `Error conectando con IA: ${fetchError.message}` });
@@ -3546,6 +3633,77 @@ Responde en español con datos concretos. Si te piden conteos de docentes o tecn
   } catch (error) {
     console.error('AI prompt error:', error);
     return res.status(500).json({ error: `Error procesando prompt: ${error.message}` });
+  }
+}
+
+/**
+ * POST /analista/ia/rebuild-index
+ * Construye (o reconstruye) el índice vectorial RAG para la escuela activa.
+ * Requiere que el modelo de embeddings esté disponible en Ollama.
+ */
+async function aiRebuildIndex(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchool } = resolveActiveSchool(req, schoolOptions);
+
+    const schoolKey = (req.body && req.body.schoolKey) || (activeSchool && activeSchool.key);
+    const targetSchool = schoolOptions.find((s) => s.key === schoolKey) || activeSchool;
+
+    if (!targetSchool) {
+      return res.status(400).json({ error: 'No hay escuela seleccionada para indexar.' });
+    }
+
+    const schoolDataContext = await buildAiSchoolDataContext(targetSchool);
+    if (!schoolDataContext) {
+      return res.status(400).json({ error: 'No se encontraron datos para esta escuela.' });
+    }
+
+    // Invalidate old index before rebuilding
+    schoolIndexBuilder.invalidateIndex(targetSchool.key);
+
+    const index = await schoolIndexBuilder.buildSchoolIndex(
+      schoolDataContext,
+      schoolDataContext._rawRows
+    );
+    schoolIndexBuilder.saveIndex(targetSchool.key, index);
+
+    return res.json({
+      ok: true,
+      school: targetSchool.label,
+      chunks: index.size,
+      message: `Índice construido con ${index.size} fragmentos para "${targetSchool.label}".`,
+    });
+  } catch (error) {
+    console.error('aiRebuildIndex error:', error);
+    return res.status(500).json({ error: `Error al construir el índice: ${error.message}` });
+  }
+}
+
+/**
+ * GET /analista/ia/index-status
+ * Devuelve si la escuela activa tiene índice construido y cuántos chunks contiene.
+ */
+async function aiIndexStatus(req, res) {
+  try {
+    const schoolOptions = await getSchoolOptionsFromMxg();
+    const { activeSchool } = resolveActiveSchool(req, schoolOptions);
+    const schoolKey = (req.query && req.query.schoolKey) || (activeSchool && activeSchool.key);
+    const targetSchool = schoolOptions.find((s) => s.key === schoolKey) || activeSchool;
+
+    if (!targetSchool) {
+      return res.json({ indexed: false, school: null, chunks: 0 });
+    }
+
+    const index = schoolIndexBuilder.loadIndex(targetSchool.key);
+    return res.json({
+      indexed: Boolean(index),
+      school: targetSchool.label,
+      schoolKey: targetSchool.key,
+      chunks: index ? index.size : 0,
+    });
+  } catch (error) {
+    console.error('aiIndexStatus error:', error);
+    return res.status(500).json({ error: error.message });
   }
 }
 
@@ -3570,4 +3728,6 @@ module.exports = {
   exportMxgRuaaOverlapCsv,
   escuelaDashboard,
   aiPrompt,
+  aiRebuildIndex,
+  aiIndexStatus,
 };

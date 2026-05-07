@@ -19,6 +19,9 @@ pids/
 *.seed
 *.pid.lock
 
+# Vector index persistence
+data/vector-indexes/
+
 # Coverage and test output
 coverage/
 .nyc_output/

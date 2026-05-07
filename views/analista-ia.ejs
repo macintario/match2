@@ -43,6 +43,16 @@
       </div>
     <% } %>
 
+    <%# ── Panel de índice vectorial ── %>
+    <div id="index-status-panel" style="background:#f8f8f2; border:1px solid #ddd; border-radius:6px; padding:0.75rem 1rem; margin-bottom:1rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <span id="index-badge" style="font-size:0.85rem; color:#555;">Verificando índice...</span>
+      <button id="rebuild-index-btn" class="btn btn-secondary" style="font-size:0.82rem; padding:0.3rem 0.9rem;" disabled>
+        <span class="btn-label">Construir índice RAG</span>
+        <span class="btn-spinner" aria-hidden="true"></span>
+      </button>
+      <span id="rebuild-status" style="font-size:0.82rem; color:#555;"></span>
+    </div>
+
     <p style="margin:0 0 0.6rem 0;"><strong>Ejemplos:</strong></p>
     <ul style="margin-top:0; padding-left:1.1rem;">
       <li>Cuantos docentes estan cargados?</li>
@@ -76,15 +86,99 @@
     const promptInput = document.getElementById('ai-prompt-input');
     const sendBtn = chatForm ? chatForm.querySelector('button[type="submit"]') : null;
     const schoolSelect = document.getElementById('school-key');
+    const indexBadge = document.getElementById('index-badge');
+    const rebuildBtn = document.getElementById('rebuild-index-btn');
+    const rebuildStatus = document.getElementById('rebuild-status');
 
-    function appendMessage(className, text) {
+    const SOURCE_LABELS = {
+      rag: '🔍 RAG',
+      summary: '📊 resumen',
+      deterministic: '⚡ directo',
+    };
+
+    function appendMessage(className, text, source) {
       const message = document.createElement('div');
       message.className = className;
-      message.textContent = text;
+      // Support basic **bold** markdown in responses
+      message.innerHTML = text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+      if (source && SOURCE_LABELS[source]) {
+        const tag = document.createElement('span');
+        tag.textContent = ' ' + SOURCE_LABELS[source];
+        tag.style.cssText = 'font-size:0.72rem;opacity:0.6;margin-left:0.4rem;';
+        message.appendChild(tag);
+      }
       messagesDiv.appendChild(message);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
+    // ── Index status ──────────────────────────────────────────────────────────
+    function currentSchoolKey() {
+      return schoolSelect ? schoolSelect.value : '';
+    }
+
+    async function refreshIndexStatus() {
+      if (!indexBadge) return;
+      try {
+        const sk = currentSchoolKey();
+        const url = '<%= basePath %>/analista/ia/index-status' + (sk ? '?schoolKey=' + encodeURIComponent(sk) : '');
+        const r = await fetch(url);
+        const d = await r.json();
+        if (d.indexed) {
+          indexBadge.innerHTML = `<span style="color:#2a7a2a;">✔ Índice RAG activo</span> — <em>${d.school}</em> — ${d.chunks} fragmentos`;
+          if (rebuildBtn) {
+            rebuildBtn.querySelector('.btn-label').textContent = 'Reconstruir índice';
+            rebuildBtn.disabled = false;
+          }
+        } else {
+          indexBadge.innerHTML = `<span style="color:#a05a00;">⚠ Sin índice</span>${d.school ? ' — <em>' + d.school + '</em>' : ''} — las respuestas usan resumen estadístico`;
+          if (rebuildBtn) {
+            rebuildBtn.querySelector('.btn-label').textContent = 'Construir índice RAG';
+            rebuildBtn.disabled = false;
+          }
+        }
+      } catch (_) {
+        if (indexBadge) indexBadge.textContent = 'No se pudo verificar el índice.';
+      }
+    }
+
+    if (schoolSelect) {
+      schoolSelect.addEventListener('change', refreshIndexStatus);
+    }
+    refreshIndexStatus();
+
+    // ── Rebuild button ────────────────────────────────────────────────────────
+    if (rebuildBtn) {
+      rebuildBtn.addEventListener('click', async function () {
+        rebuildBtn.disabled = true;
+        rebuildBtn.classList.add('is-loading');
+        if (rebuildStatus) rebuildStatus.textContent = 'Construyendo índice, por favor espera…';
+
+        try {
+          const r = await fetch('<%= basePath %>/analista/ia/rebuild-index', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ schoolKey: currentSchoolKey() }),
+          });
+          const d = await r.json();
+          if (r.ok && d.ok) {
+            if (rebuildStatus) rebuildStatus.textContent = d.message;
+            refreshIndexStatus();
+          } else {
+            if (rebuildStatus) rebuildStatus.textContent = '✖ ' + (d.error || 'Error desconocido');
+          }
+        } catch (err) {
+          if (rebuildStatus) rebuildStatus.textContent = '✖ ' + err.message;
+        } finally {
+          rebuildBtn.disabled = false;
+          rebuildBtn.classList.remove('is-loading');
+        }
+      });
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
     if (!chatForm || !sendBtn) {
       return;
     }
@@ -121,7 +215,7 @@
           throw new Error(data.error || 'Error en la respuesta del servidor');
         }
 
-        appendMessage('ai-message ai-message-bot', data.response || 'No se pudo procesar la respuesta');
+        appendMessage('ai-message ai-message-bot', data.response || 'No se pudo procesar la respuesta', data.source);
       } catch (error) {
         appendMessage('ai-message ai-message-bot', 'Error al conectar con la IA: ' + error.message);
       } finally {

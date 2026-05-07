@@ -1,0 +1,82 @@
+'use strict';
+
+const RAG_EXCEL_COLUMN_MAPPINGS = [
+  {
+    source: 'PXP',
+    description: 'Mapa de columnas de nomina/plantilla de docentes hacia tablas docentes y Plazas.',
+    mappings: [
+      { excelColumn: 'PLA_CIC_ID', aliases: ['CICLO'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'cicloId', meaning: 'Ciclo escolar del plantel.' },
+      { excelColumn: 'PLA_ID', aliases: ['PLANTEL'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'plantelId', meaning: 'Clave del plantel.' },
+      { excelColumn: 'PLA_DESCRIPCION', aliases: ['PLANTELDESC'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'plantel', meaning: 'Nombre o descripcion del plantel.' },
+      { excelColumn: 'USUARIO', aliases: ['usuarioPlantel'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'usuarioPlantel', meaning: 'Usuario responsable del plantel.' },
+      { excelColumn: 'RFC', aliases: ['rfc'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'rfc', meaning: 'Identificador fiscal del docente.' },
+      { excelColumn: 'NUM_EMP', aliases: ['NUMEMP', 'numeroEmpleado'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'numEmp', meaning: 'Numero de empleado del docente.' },
+      { excelColumn: 'NOMBRE', aliases: ['nombre'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'nombre', meaning: 'Nombre completo del docente.' },
+      { excelColumn: 'DICTAMEN', aliases: ['dictamen'], targetModel: 'TeacherImport', targetTable: 'docentes', targetColumn: 'dictamen', meaning: 'Tipo de dictamen o categoria del docente.' },
+      { excelColumn: 'PLAZA', aliases: ['clavePlaza', 'clave'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'clave', meaning: 'Clave de la plaza asignada.' },
+      { excelColumn: 'PZA_HORAS', aliases: ['horasPlaza', 'horas'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'horas', meaning: 'Horas de la plaza.' },
+      { excelColumn: 'PZA_NUM_PLAZA', aliases: ['numeroPlaza'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'numeroPlaza', meaning: 'Numero interno de la plaza.' },
+      { excelColumn: 'PZA_FEC_INI', aliases: ['fechaInicio'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'fechaInicio', meaning: 'Fecha de inicio de vigencia de la plaza.' },
+      { excelColumn: 'PZA_FEC_FIN', aliases: ['fechaFin'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'fechaFin', meaning: 'Fecha de fin de vigencia de la plaza.' },
+      { excelColumn: 'S', aliases: ['STATUS', 'status'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'status', meaning: 'Estatus de la plaza.' },
+      { excelColumn: 'MOT', aliases: ['motivo'], targetModel: 'PositionImport', targetTable: 'Plazas', targetColumn: 'motivo', meaning: 'Motivo administrativo de la plaza.' },
+    ],
+  },
+  {
+    source: 'MXG',
+    description: 'Mapa de columnas de cargas MXG hacia mxg_schedule_imports.',
+    mappings: [
+      { excelColumn: 'PLANTEL', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'plantelId', meaning: 'Clave de plantel.' },
+      { excelColumn: 'PLANTELDESC', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'plantelDesc', meaning: 'Descripcion del plantel.' },
+      { excelColumn: 'CICLO', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'cicloId', meaning: 'Ciclo escolar.' },
+      { excelColumn: 'CARRERA', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'carreraId', meaning: 'Clave de carrera.' },
+      { excelColumn: 'ASIGNATURA', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'asignaturaId', meaning: 'Clave de asignatura.' },
+      { excelColumn: 'ASIGNATURADESC', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'asignaturaDesc', meaning: 'Nombre de asignatura.' },
+      { excelColumn: 'NUMEMP', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'numEmp', meaning: 'Numero de empleado del docente con carga.' },
+      { excelColumn: 'RFC2', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'rfc', meaning: 'RFC del docente con carga.' },
+      { excelColumn: 'NOMBRE2', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'nombre', meaning: 'Nombre del docente con carga.' },
+      { excelColumn: 'PLAZA', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'plaza', meaning: 'Clave de plaza relacionada con la carga.' },
+      { excelColumn: 'HRSASIG', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'hrsAsig', meaning: 'Horas asignadas en la carga.' },
+      { excelColumn: 'HRSFTG', aliases: [], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'hrsFtg', meaning: 'Horas FTG registradas.' },
+      { excelColumn: 'HRSNECESARIAS', aliases: ['HRS SOLICITADAS'], targetModel: 'MxgScheduleImport', targetTable: 'mxg_schedule_imports', targetColumn: 'hrsNecesarias', meaning: 'Horas necesarias adicionales.' },
+    ],
+  },
+  {
+    source: 'HISTORICO',
+    description: 'Mapa de columnas historicas hacia historical_subject_imports.',
+    mappings: [
+      { excelColumn: 'PLANTEL', aliases: [], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'plantelId', meaning: 'Clave de plantel.' },
+      { excelColumn: 'DESCRIPCION', aliases: ['PLANTELDESC'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'plantelDescripcion', meaning: 'Descripcion del plantel.' },
+      { excelColumn: 'RFC', aliases: [], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'rfc', meaning: 'RFC del docente historico.' },
+      { excelColumn: 'NUMEMP', aliases: ['NUM_EMP'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'numEmp', meaning: 'Numero de empleado historico.' },
+      { excelColumn: 'NOMBRE', aliases: [], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'nombre', meaning: 'Nombre del docente historico.' },
+      { excelColumn: 'CARID', aliases: ['CARRERA'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'carreraId', meaning: 'Clave de carrera.' },
+      { excelColumn: 'ASIID', aliases: ['ASIGNATURA'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'asignaturaId', meaning: 'Clave de asignatura.' },
+      { excelColumn: 'ASIDESC', aliases: ['ASIGNATURADESC'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'asignaturaDescripcion', meaning: 'Descripcion de asignatura.' },
+      { excelColumn: 'CIC_ID', aliases: ['CICLO'], targetModel: 'HistoricalSubjectImport', targetTable: 'historical_subject_imports', targetColumn: 'cicloId', meaning: 'Ciclo escolar historico.' },
+    ],
+  },
+  {
+    source: 'RUAA',
+    description: 'Mapa de columnas RUAA (clase/actividad) hacia ruaa_schedule_imports.',
+    mappings: [
+      { excelColumn: 'NUM_EMP', aliases: ['NUMEMP'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'numEmp', meaning: 'Numero de empleado.' },
+      { excelColumn: 'RFC', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'rfc', meaning: 'RFC docente.' },
+      { excelColumn: 'NOMBRE', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'nombre', meaning: 'Nombre docente.' },
+      { excelColumn: 'PLANTEL', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'plantel', meaning: 'Plantel de adscripcion.' },
+      { excelColumn: 'USUARIO', aliases: ['usuarioPlantel'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'usuarioPlantel', meaning: 'Usuario del plantel.' },
+      { excelColumn: 'CARR', aliases: ['CARRERA'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'carreraId', meaning: 'Clave de carrera para clases.' },
+      { excelColumn: 'ASIG', aliases: ['ASIGNATURAID'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'asignaturaId', meaning: 'Clave de asignatura para clases.' },
+      { excelColumn: 'ASIGNATURA', aliases: ['ASIGNATURADESC'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'asignaturaDescripcion', meaning: 'Descripcion de asignatura para clases.' },
+      { excelColumn: 'GRUPO', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'grupo', meaning: 'Grupo de clase.' },
+      { excelColumn: 'CVE_ACT', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'actividadClave', meaning: 'Clave de actividad en descargas.' },
+      { excelColumn: 'ACTIVIDAD', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'actividadNombre', meaning: 'Nombre de actividad en descargas.' },
+      { excelColumn: 'LUGAR', aliases: [], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'lugarActividad', meaning: 'Lugar de actividad en descargas.' },
+      { excelColumn: 'HRS_ASIG', aliases: ['HORAS', 'DES_HRS_ACTIV'], targetModel: 'RuaaScheduleImport', targetTable: 'ruaa_schedule_imports', targetColumn: 'horas', meaning: 'Horas de clase o actividad.' },
+    ],
+  },
+];
+
+module.exports = {
+  RAG_EXCEL_COLUMN_MAPPINGS,
+};

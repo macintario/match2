@@ -91,6 +91,19 @@ router.post(
 	express.json(),
 	dashboardController.aiPrompt
 );
+router.post(
+	'/analista/ia/rebuild-index',
+	ensureAuth,
+	requireRole(['analista']),
+	express.json(),
+	dashboardController.aiRebuildIndex
+);
+router.get(
+	'/analista/ia/index-status',
+	ensureAuth,
+	requireRole(['analista']),
+	dashboardController.aiIndexStatus
+);
 router.get('/escuela', ensureAuth, requireRole(['escuela']), dashboardController.escuelaDashboard);
 
 module.exports = router;
