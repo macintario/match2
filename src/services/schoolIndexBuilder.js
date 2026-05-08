@@ -360,7 +360,14 @@ function buildExcelMappingChunks() {
 async function buildSchoolIndex(schoolDataContext, rawRows) {
   const index = new VectorIndex();
   const { schoolLabel, pxp, mxg, historico, ruaa } = schoolDataContext;
-  const { pxpRows = [], mxgRows = [], historicoRows = [], ruaaRows = [] } = rawRows;
+  const { pxpRows = [], mxgRows = [], historicoRows = [], ruaaRows = [], categRows = [] } = rawRows;
+
+  // Build CLAVE → { CATEGORIA, CAT_SIMPLE } lookup from CATALOGO_CATEGORIAS
+  const categByClave = new Map();
+  for (const c of categRows) {
+    const clave = String(c.CLAVE || '').trim().toUpperCase();
+    if (clave) categByClave.set(clave, { categoria: c.CATEGORIA || clave, catSimple: c.CAT_SIMPLE || '' });
+  }
 
   // ── Chunks de esquema BD (globales) ───────────────────────────────────────
   const schemaChunks = await buildDatabaseSchemaChunks();
@@ -403,9 +410,69 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
       const text =
         `Docentes PxP en "${schoolLabel}" (grupo ${i + 1}/${batches.length}): ` +
         batches[i]
-          .map((r) => `${r.nombre} RFC:${r.rfc} Dictamen:${r.dictamen}`)
+          .map((r) => `${r.nombre} RFC:${r.rfc} Dictamen:${r.dictamen}${r.funciones ? ' Funcion:' + r.funciones : ''}`)
           .join('; ');
       await index.add(`pxp_${i}`, text, { type: 'pxp', school: schoolLabel });
+    }
+
+    // ── Chunk resumen de funciones únicas en PxP ───────────────────────────
+    const uniqueFunciones = [...new Set(
+      pxpRows.map((r) => r.funciones).filter(Boolean)
+    )].sort();
+    if (uniqueFunciones.length > 0) {
+      const funcionesText =
+        `Funciones (campo FUNCION) registradas en el archivo PxP para "${schoolLabel}": ` +
+        uniqueFunciones.join(', ') + '. ' +
+        `Total de docentes en PxP: ${pxpRows.length}.`;
+      await index.add('pxp_funciones_summary', funcionesText, {
+        type: 'pxp_funciones',
+        school: schoolLabel,
+      });
+    }
+
+    // ── Chunk distribución por categoría dictaminada (DICTAMEN × CATALOGO_CATEGORIAS) ──
+    const dictamenCount = new Map(); // clave → count
+    for (const r of pxpRows) {
+      const clave = String(r.dictamen || '').trim().toUpperCase();
+      if (clave) dictamenCount.set(clave, (dictamenCount.get(clave) || 0) + 1);
+    }
+    if (dictamenCount.size > 0) {
+      const lines = [...dictamenCount.entries()]
+        .sort((a, b) => b[1] - a[1]) // mayor a menor
+        .map(([clave, count]) => {
+          const info = categByClave.get(clave);
+          const nombre = info ? info.categoria : clave;
+          const simple = info && info.catSimple ? ` (simplificada: "${info.catSimple}")` : '';
+          return `${nombre} (CLAVE DICTAMEN: ${clave})${simple}: ${count} docente${count !== 1 ? 's' : ''}`;
+        });
+      const distText =
+        `Distribución de docentes PxP en "${schoolLabel}" por categoría dictaminada ` +
+        `(relación campo DICTAMEN de PxP con columna CLAVE de tabla CATALOGO_CATEGORIAS): ` +
+        lines.join('; ') + `. Total: ${pxpRows.length} docentes.`;
+      await index.add('pxp_dictamen_distribution', distText, {
+        type: 'pxp_dictamen',
+        school: schoolLabel,
+      });
+    }
+
+    // ── Chunk catálogo completo de categorías (CATALOGO_CATEGORIAS) ────────
+    if (categRows.length > 0) {
+      const catBatches = chunkArray(categRows, 20);
+      for (let i = 0; i < catBatches.length; i++) {
+        const catText =
+          `Catálogo de categorías docentes (CATALOGO_CATEGORIAS) ` +
+          `(bloque ${i + 1}/${catBatches.length}): ` +
+          catBatches[i]
+            .map((c) => {
+              const simple = c.CAT_SIMPLE ? ` / simplificada: "${c.CAT_SIMPLE}"` : '';
+              return `CLAVE:"${c.CLAVE}" CATEGORIA:"${c.CATEGORIA}"${simple}`;
+            })
+            .join('; ');
+        await index.add(`categ_catalog_${i}`, catText, {
+          type: 'categ_catalog',
+          school: schoolLabel,
+        });
+      }
     }
   }
 

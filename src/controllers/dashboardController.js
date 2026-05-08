@@ -21,8 +21,35 @@ const {
   MxgScheduleImport,
   SubstitutionProposal,
   User,
+  Categ,
   sequelize,
 } = require('../models');
+
+let UndiciAgent = null;
+try {
+  ({ Agent: UndiciAgent } = require('undici'));
+} catch (_) {
+  UndiciAgent = null;
+}
+
+let ollamaDispatcher = null;
+
+function toPositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getOllamaDispatcher() {
+  if (!UndiciAgent) return null;
+  if (!ollamaDispatcher) {
+    ollamaDispatcher = new UndiciAgent({
+      headersTimeout: toPositiveInt(process.env.OLLAMA_HEADERS_TIMEOUT_MS, 180000),
+      bodyTimeout: toPositiveInt(process.env.OLLAMA_BODY_TIMEOUT_MS, 300000),
+      connectTimeout: toPositiveInt(process.env.OLLAMA_CONNECT_TIMEOUT_MS, 20000),
+    });
+  }
+  return ollamaDispatcher;
+}
 
 function setFlash(req, type, text) {
   req.session.flash = { type, text };
@@ -1216,7 +1243,7 @@ async function buildAiSchoolDataContext(activeSchool) {
         uploadId: latestPxpUpload.id,
         ...(schoolWherePxp || {}),
       },
-      attributes: ['numEmp', 'rfc', 'nombre', 'dictamen'],
+      attributes: ['numEmp', 'rfc', 'nombre', 'dictamen', 'funciones'],
       raw: true,
     });
   }
@@ -1293,6 +1320,10 @@ async function buildAiSchoolDataContext(activeSchool) {
       mxgRows: mxgTeacherRows,
       historicoRows: historicoTeacherRows,
       ruaaRows: ruaaTeacherRows,
+      categRows: await Categ.findAll({
+        attributes: ['CLAVE', 'CATEGORIA', 'CAT_SIMPLE'],
+        raw: true,
+      }),
     },
   };
 }
@@ -1692,7 +1723,7 @@ async function analistaAnalyticsPage(req, res) {
           uploadId: latestPxpUpload.id,
           ...(schoolWherePxp || {}),
         },
-        attributes: ['numEmp', 'rfc', 'nombre', 'dictamen'],
+        attributes: ['numEmp', 'rfc', 'nombre', 'dictamen', 'funciones'],
         raw: true,
       });
       pxpTeacherByNumEmp = buildPxpTeacherLookup(pxpTeacherRows);
@@ -3458,6 +3489,77 @@ function buildDeterministicResponse(prompt, schoolDataContext, targetSchool) {
   return null;
 }
 
+function buildLocalCategoryCountFallback(prompt, schoolDataContext) {
+  if (!schoolDataContext || !schoolDataContext._rawRows) return null;
+
+  const q = normalizeText(prompt);
+  if (!/docente/.test(q) || !/categor/.test(q)) return null;
+
+  let targetCategory = '';
+  const quoted = String(prompt || '').match(/["'“”]([^"'“”]+)["'“”]/);
+  if (quoted && quoted[1]) {
+    targetCategory = String(quoted[1]).trim();
+  } else if (q.includes('profesor titular')) {
+    targetCategory = 'profesor titular';
+  }
+
+  if (!targetCategory) return null;
+
+  const { pxpRows = [], categRows = [] } = schoolDataContext._rawRows;
+  if (!Array.isArray(pxpRows) || pxpRows.length === 0) return null;
+  if (!Array.isArray(categRows) || categRows.length === 0) return null;
+
+  const targetNorm = normalizeText(targetCategory);
+  const categByClave = new Map();
+  for (const row of categRows) {
+    const clave = String((row && row.CLAVE) || '').trim().toUpperCase();
+    if (!clave) continue;
+    categByClave.set(clave, {
+      categoria: String((row && row.CATEGORIA) || ''),
+      catSimple: String((row && row.CAT_SIMPLE) || ''),
+    });
+  }
+
+  let total = 0;
+  const matchedBuckets = new Map();
+
+  for (const teacher of pxpRows) {
+    const clave = String((teacher && teacher.dictamen) || '').trim().toUpperCase();
+    if (!clave) continue;
+
+    const info = categByClave.get(clave);
+    const categoria = info ? info.categoria : '';
+    const catSimple = info ? info.catSimple : '';
+
+    const categoriaNorm = normalizeText(categoria);
+    const catSimpleNorm = normalizeText(catSimple);
+    const claveNorm = normalizeText(clave);
+
+    const isMatch =
+      categoriaNorm.includes(targetNorm) ||
+      catSimpleNorm.includes(targetNorm) ||
+      claveNorm.includes(targetNorm);
+
+    if (!isMatch) continue;
+
+    total += 1;
+    const bucketLabel = categoria || clave;
+    matchedBuckets.set(bucketLabel, (matchedBuckets.get(bucketLabel) || 0) + 1);
+  }
+
+  const schoolLabel = schoolDataContext.schoolLabel || 'la escuela activa';
+  const breakdown = [...matchedBuckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count]) => `${label}: ${count}`)
+    .join('; ');
+
+  if (total === 0) {
+    return `En **${schoolLabel}** no se encontraron docentes en PxP cuya categoría dictaminada coincida con **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).`;
+  }
+
+  return `En **${schoolLabel}** hay **${total}** docente(s) con categoría dictaminada **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).${breakdown ? ` Desglose: ${breakdown}.` : ''}`;
+}
+
 function detectRagIntent(prompt) {
   const q = normalizeText(prompt);
 
@@ -3493,6 +3595,7 @@ function computeChunkIntentBonus(chunk, intent, normalizedPrompt) {
 
   if (intent.dataIntent) {
     if (['pxp', 'mxg', 'historico', 'ruaa', 'db_table_samples'].includes(type)) bonus += 0.2;
+    if (['pxp_dictamen', 'pxp_funciones', 'categ_catalog'].includes(type)) bonus += 0.35;
     if (type === 'summary') bonus += 0.05;
   }
 
@@ -3536,12 +3639,6 @@ async function aiPrompt(req, res) {
     const schoolDataContext = targetSchool
       ? await buildAiSchoolDataContext(targetSchool)
       : null;
-
-    // --- Respuestas deterministas para preguntas frecuentes ---
-    const deterministicResponse = buildDeterministicResponse(prompt, schoolDataContext, targetSchool);
-    if (deterministicResponse) {
-      return res.json({ response: deterministicResponse, source: 'deterministic' });
-    }
 
     // --- RAG: buscar chunks relevantes si hay índice vectorial ---
     let ragContext = null;
@@ -3603,7 +3700,13 @@ async function aiPrompt(req, res) {
     try {
       const ollamaBase = process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:11434';
       const ollamaModel = process.env.OLLAMA_MODEL || 'qwen2.5:14b';
-      const ollamaResponse = await fetch(`${ollamaBase}/api/generate`, {
+      const startedAt = Date.now();
+      const slowThresholdMs = toPositiveInt(process.env.OLLAMA_SLOW_RESPONSE_MS, 15000);
+      const requestTimeoutMs = toPositiveInt(process.env.OLLAMA_REQUEST_TIMEOUT_MS, 240000);
+      const abortController = new AbortController();
+      const timeoutHandle = setTimeout(() => abortController.abort(), requestTimeoutMs);
+
+      const fetchOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3612,11 +3715,37 @@ async function aiPrompt(req, res) {
           system: systemPrompt,
           stream: false,
         }),
-      });
+        signal: abortController.signal,
+      };
+
+      const dispatcher = getOllamaDispatcher();
+      if (dispatcher) {
+        fetchOptions.dispatcher = dispatcher;
+      }
+
+      let ollamaResponse;
+      try {
+        ollamaResponse = await fetch(`${ollamaBase}/api/generate`, fetchOptions);
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      const latencyLog = `[aiPrompt] Ollama responded in ${elapsedMs}ms (model=${ollamaModel}, school=${targetSchool ? targetSchool.key : 'none'})`;
+      if (elapsedMs >= slowThresholdMs) {
+        console.warn(`${latencyLog} [slow>=${slowThresholdMs}ms]`);
+      } else {
+        console.info(latencyLog);
+      }
 
       if (!ollamaResponse.ok) {
         const errorText = await ollamaResponse.text();
         console.error('Ollama error:', errorText);
+        const localFallback = buildLocalCategoryCountFallback(prompt, schoolDataContext);
+        if (localFallback) {
+          console.warn('[aiPrompt] Using local category fallback after non-OK Ollama response');
+          return res.json({ response: localFallback, source: 'summary' });
+        }
         return res.status(500).json({ error: 'Error al consultar la IA: ' + errorText });
       }
 
@@ -3628,7 +3757,12 @@ async function aiPrompt(req, res) {
       });
     } catch (fetchError) {
       console.error('Fetch error:', fetchError);
-      return res.status(500).json({ error: `Error conectando con IA: ${fetchError.message}` });
+      const localFallback = buildLocalCategoryCountFallback(prompt, schoolDataContext);
+      if (localFallback) {
+        console.warn('[aiPrompt] Using local category fallback after fetch failure/timeout');
+        return res.json({ response: localFallback, source: 'summary' });
+      }
+      return res.status(504).json({ error: `La IA tardó demasiado en responder o no estuvo disponible: ${fetchError.message}` });
     }
   } catch (error) {
     console.error('AI prompt error:', error);
