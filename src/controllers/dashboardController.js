@@ -3699,7 +3699,7 @@ async function aiPrompt(req, res) {
     // --- Llamada a Ollama ---
     try {
       const ollamaBase = process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:11434';
-      const ollamaModel = process.env.OLLAMA_MODEL || 'qwen2.5:14b';
+      const ollamaModel = process.env.OLLAMA_MODEL || 'deepseek-r1:1.5b';
       const startedAt = Date.now();
       const slowThresholdMs = toPositiveInt(process.env.OLLAMA_SLOW_RESPONSE_MS, 15000);
       const requestTimeoutMs = toPositiveInt(process.env.OLLAMA_REQUEST_TIMEOUT_MS, 240000);
