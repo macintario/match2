@@ -32,23 +32,56 @@ try {
   UndiciAgent = null;
 }
 
-let ollamaDispatcher = null;
+let llmDispatcher = null;
+const indexBuildStatusBySchool = new Map();
+
+function getIndexBuildStatus(schoolKey) {
+  return indexBuildStatusBySchool.get(String(schoolKey || '').trim()) || null;
+}
+
+function setIndexBuildStatus(schoolKey, patch) {
+  const key = String(schoolKey || '').trim();
+  if (!key) return null;
+
+  const previous = indexBuildStatusBySchool.get(key) || {
+    schoolKey: key,
+    state: 'idle',
+    progressPercent: 0,
+    totalChunks: 0,
+    completedChunks: 0,
+    stage: 'idle',
+    message: '',
+    startedAt: null,
+    endedAt: null,
+    error: null,
+  };
+
+  const next = {
+    ...previous,
+    ...patch,
+    schoolKey: key,
+    updatedAt: new Date().toISOString(),
+  };
+
+  indexBuildStatusBySchool.set(key, next);
+  return next;
+}
 
 function toPositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getOllamaDispatcher() {
+function getLlmDispatcher() {
   if (!UndiciAgent) return null;
-  if (!ollamaDispatcher) {
-    ollamaDispatcher = new UndiciAgent({
-      headersTimeout: toPositiveInt(process.env.OLLAMA_HEADERS_TIMEOUT_MS, 180000),
-      bodyTimeout: toPositiveInt(process.env.OLLAMA_BODY_TIMEOUT_MS, 300000),
-      connectTimeout: toPositiveInt(process.env.OLLAMA_CONNECT_TIMEOUT_MS, 20000),
+  if (!llmDispatcher) {
+    llmDispatcher = new UndiciAgent({
+      headersTimeout: toPositiveInt(process.env.LLM_HEADERS_TIMEOUT_MS || process.env.OLLAMA_HEADERS_TIMEOUT_MS, 180000),
+      bodyTimeout: toPositiveInt(process.env.LLM_BODY_TIMEOUT_MS || process.env.OLLAMA_BODY_TIMEOUT_MS, 300000),
+      connectTimeout: toPositiveInt(process.env.LLM_CONNECT_TIMEOUT_MS || process.env.OLLAMA_CONNECT_TIMEOUT_MS, 20000),
     });
   }
-  return ollamaDispatcher;
+  return llmDispatcher;
 }
 
 function setFlash(req, type, text) {
@@ -3489,18 +3522,32 @@ function buildDeterministicResponse(prompt, schoolDataContext, targetSchool) {
   return null;
 }
 
+function isCategoryCountQuestion(normalizedPrompt) {
+  const q = String(normalizedPrompt || '');
+  const asksCount = /(cuanto|cuantos|cantidad|total|numero|número|conteo|cuenta)/.test(q);
+  const hasTeacherHint = /(docente|docentes|profesor|profesores|tecnico docente|tecnico docentes|tec doc)/.test(q);
+  const hasCategoryHint = /(categor|dictamen|clave|tecnico docente|profesor titular|profesor de asignatura|profesor asociado|tec doc)/.test(q);
+  return (asksCount && hasTeacherHint && hasCategoryHint) || (hasTeacherHint && /categor/.test(q));
+}
+
 function buildLocalCategoryCountFallback(prompt, schoolDataContext) {
   if (!schoolDataContext || !schoolDataContext._rawRows) return null;
 
   const q = normalizeText(prompt);
-  if (!/docente/.test(q) || !/categor/.test(q)) return null;
+  if (!isCategoryCountQuestion(q)) return null;
 
   let targetCategory = '';
   const quoted = String(prompt || '').match(/["'“”]([^"'“”]+)["'“”]/);
   if (quoted && quoted[1]) {
     targetCategory = String(quoted[1]).trim();
+  } else if (q.includes('tecnico docente')) {
+    targetCategory = 'tecnico docente';
   } else if (q.includes('profesor titular')) {
     targetCategory = 'profesor titular';
+  } else if (q.includes('profesor') && q.includes('asignatura')) {
+    targetCategory = 'profesor de asignatura';
+  } else if (q.includes('profesor') && q.includes('asociado')) {
+    targetCategory = 'profesor asociado';
   }
 
   if (!targetCategory) return null;
@@ -3510,6 +3557,12 @@ function buildLocalCategoryCountFallback(prompt, schoolDataContext) {
   if (!Array.isArray(categRows) || categRows.length === 0) return null;
 
   const targetNorm = normalizeText(targetCategory);
+  const targetAliases = [targetNorm];
+  if (targetNorm.includes('tecnico docente')) {
+    targetAliases.push('tec doc');
+    targetAliases.push('tecnico docente');
+  }
+
   const categByClave = new Map();
   for (const row of categRows) {
     const clave = String((row && row.CLAVE) || '').trim().toUpperCase();
@@ -3520,7 +3573,7 @@ function buildLocalCategoryCountFallback(prompt, schoolDataContext) {
     });
   }
 
-  let total = 0;
+  const matchedTeacherKeys = new Set();
   const matchedBuckets = new Map();
 
   for (const teacher of pxpRows) {
@@ -3535,29 +3588,48 @@ function buildLocalCategoryCountFallback(prompt, schoolDataContext) {
     const catSimpleNorm = normalizeText(catSimple);
     const claveNorm = normalizeText(clave);
 
-    const isMatch =
-      categoriaNorm.includes(targetNorm) ||
-      catSimpleNorm.includes(targetNorm) ||
-      claveNorm.includes(targetNorm);
+    const isMatch = targetAliases.some((alias) => (
+      categoriaNorm.includes(alias) ||
+      catSimpleNorm.includes(alias) ||
+      claveNorm.includes(alias)
+    ));
 
     if (!isMatch) continue;
 
-    total += 1;
-    const bucketLabel = categoria || clave;
-    matchedBuckets.set(bucketLabel, (matchedBuckets.get(bucketLabel) || 0) + 1);
+    const teacherKey = String((teacher && teacher.numEmp) || (teacher && teacher.rfc) || (teacher && teacher.nombre) || '').trim();
+    if (teacherKey) {
+      matchedTeacherKeys.add(teacherKey);
+    }
+
+    const bucketKey = `${clave}|||${categoria || 'SIN CATEGORIA'}`;
+    const bucket = matchedBuckets.get(bucketKey) || {
+      clave,
+      categoria: categoria || 'SIN CATEGORIA',
+      teachers: new Set(),
+    };
+    bucket.teachers.add(teacherKey || `${bucketKey}-${bucket.teachers.size}`);
+    matchedBuckets.set(bucketKey, bucket);
   }
+
+  const total = matchedTeacherKeys.size;
 
   const schoolLabel = schoolDataContext.schoolLabel || 'la escuela activa';
-  const breakdown = [...matchedBuckets.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, count]) => `${label}: ${count}`)
-    .join('; ');
+  const breakdown = [...matchedBuckets.values()]
+    .map((bucket) => ({
+      clave: bucket.clave,
+      categoria: bucket.categoria,
+      total: bucket.teachers.size,
+    }))
+    .sort((a, b) => b.total - a.total)
+    .map((item) => `- ${item.clave} | ${item.categoria}: ${item.total}`)
+    .join('\n');
+  const breakdownBlock = `\n\nDesglose por clave/categoría:\n${breakdown || '- Sin coincidencias'}`;
 
   if (total === 0) {
-    return `En **${schoolLabel}** no se encontraron docentes en PxP cuya categoría dictaminada coincida con **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).`;
+    return `En **${schoolLabel}** no se encontraron docentes en PxP cuya categoría dictaminada coincida con **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).${breakdownBlock}`;
   }
 
-  return `En **${schoolLabel}** hay **${total}** docente(s) con categoría dictaminada **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).${breakdown ? ` Desglose: ${breakdown}.` : ''}`;
+  return `En **${schoolLabel}** hay **${total}** docente(s) únicos con categoría dictaminada **${targetCategory}** (cruce DICTAMEN → CATALOGO_CATEGORIAS.CLAVE).${breakdownBlock}`;
 }
 
 function detectRagIntent(prompt) {
@@ -3624,6 +3696,45 @@ function rerankRagChunksByIntent(chunks, prompt, topK = 5) {
   return reranked.slice(0, topK);
 }
 
+function buildAllCategoriesBreakdown(schoolDataContext) {
+  if (!schoolDataContext || !schoolDataContext._rawRows) return null;
+  const { pxpRows = [], categRows = [] } = schoolDataContext._rawRows;
+  if (!Array.isArray(pxpRows) || pxpRows.length === 0) return null;
+
+  const categByClave = new Map();
+  for (const row of categRows) {
+    const clave = String((row && row.CLAVE) || '').trim().toUpperCase();
+    if (!clave) continue;
+    categByClave.set(clave, {
+      categoria: String((row && row.CATEGORIA) || ''),
+    });
+  }
+
+  const buckets = new Map();
+  for (const teacher of pxpRows) {
+    const clave = String((teacher && teacher.dictamen) || '').trim().toUpperCase();
+    if (!clave) continue;
+    const info = categByClave.get(clave);
+    const categoria = info ? info.categoria : 'SIN CATEGORIA';
+    const bucketKey = `${clave}|||${categoria}`;
+    const bucket = buckets.get(bucketKey) || { clave, categoria, teachers: new Set() };
+    const teacherKey = String((teacher && teacher.numEmp) || (teacher && teacher.rfc) || (teacher && teacher.nombre) || '').trim();
+    bucket.teachers.add(teacherKey || `_${bucket.teachers.size}`);
+    buckets.set(bucketKey, bucket);
+  }
+
+  if (buckets.size === 0) return null;
+
+  const schoolLabel = schoolDataContext.schoolLabel || 'la escuela activa';
+  const lines = [...buckets.values()]
+    .map((b) => ({ clave: b.clave, categoria: b.categoria, total: b.teachers.size }))
+    .sort((a, b) => b.total - a.total)
+    .map((item) => `- ${item.clave} | ${item.categoria}: ${item.total}`);
+  const totalUnique = new Set([...buckets.values()].flatMap((b) => [...b.teachers])).size;
+
+  return `\n\n---\n**Datos reales de ${schoolLabel}** (cruce PxP \u2192 CATALOGO_CATEGORIAS):\nTotal docentes únicos con dictamen: **${totalUnique}**\n\nDesglose por clave/categoría:\n${lines.join('\n')}`;
+}
+
 async function aiPrompt(req, res) {
   try {
     const { prompt } = req.body || {};
@@ -3639,6 +3750,16 @@ async function aiPrompt(req, res) {
     const schoolDataContext = targetSchool
       ? await buildAiSchoolDataContext(targetSchool)
       : null;
+
+    // --- PRIORIDAD: Detectar preguntas de conteo por categoría y responder con fallback local ---
+    const q = normalizeText(prompt);
+    if (isCategoryCountQuestion(q)) {
+      const localFallback = buildLocalCategoryCountFallback(prompt, schoolDataContext);
+      if (localFallback) {
+        console.info('[aiPrompt] Using local category fallback (high-priority detection)');
+        return res.json({ response: localFallback, source: 'category-fallback' });
+      }
+    }
 
     // --- RAG: buscar chunks relevantes si hay índice vectorial ---
     let ragContext = null;
@@ -3694,65 +3815,116 @@ async function aiPrompt(req, res) {
       ? `Fragmentos de datos relevantes (recuperados por búsqueda semántica):\n${ragContext}`
       : (fallbackContext ? `Contexto disponible: ${fallbackContext}` : '');
 
-    const systemPrompt = `Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar.\n${contextBlock}\nResponde en español con datos concretos. Basa tu respuesta exclusivamente en el contexto proporcionado.`;
+    const systemInstruction =
+      'Eres un asistente de análisis de datos educativos. El usuario está analizando datos de carga escolar. ' +
+      'Responde en español con datos concretos. Basa tu respuesta exclusivamente en el contexto proporcionado.';
+    const maxContextChars = toPositiveInt(process.env.LLM_CONTEXT_MAX_CHARS, 1024);
+    const retryContextChars = toPositiveInt(process.env.LLM_CONTEXT_RETRY_MAX_CHARS, 400);
 
-    // --- Llamada a Ollama ---
+    function truncateForLlm(text, maxChars) {
+      const raw = String(text || '');
+      if (!raw || raw.length <= maxChars) return raw;
+      return `${raw.slice(0, Math.max(0, maxChars - 24))}\n...[contexto truncado]`;
+    }
+
+    function isInputTooLargeError(errorText) {
+      const msg = String(errorText || '').toLowerCase();
+      return (
+        msg.includes('too large to process') ||
+        msg.includes('batch size') ||
+        msg.includes('context length') ||
+        msg.includes('prompt is too long')
+      );
+    }
+
+    let activeContextBlock = truncateForLlm(contextBlock, maxContextChars);
+
+    // --- Llamada a LLM (llama.cpp OpenAI-compatible) ---
     try {
-      const ollamaBase = process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:11434';
-      const ollamaModel = process.env.OLLAMA_MODEL || 'deepseek-r1:1.5b';
+      const llmBase = process.env.LLM_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:8080';
+      const llmModel = process.env.LLM_MODEL || process.env.OLLAMA_MODEL || 'bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M';
       const startedAt = Date.now();
-      const slowThresholdMs = toPositiveInt(process.env.OLLAMA_SLOW_RESPONSE_MS, 15000);
-      const requestTimeoutMs = toPositiveInt(process.env.OLLAMA_REQUEST_TIMEOUT_MS, 240000);
+      const slowThresholdMs = toPositiveInt(process.env.LLM_SLOW_RESPONSE_MS || process.env.LLM_SLOW_RESPONSE_MS, 15000);
+      const requestTimeoutMs = toPositiveInt(process.env.LLM_REQUEST_TIMEOUT_MS || process.env.LLM_REQUEST_TIMEOUT_MS, 240000);
       const abortController = new AbortController();
       const timeoutHandle = setTimeout(() => abortController.abort(), requestTimeoutMs);
 
-      const fetchOptions = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: ollamaModel,
-          prompt: prompt,
-          system: systemPrompt,
-          stream: false,
-        }),
-        signal: abortController.signal,
-      };
+      const dispatcher = getLlmDispatcher();
+      let llmResponse;
+      let lastErrorText = '';
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const systemPrompt = `${systemInstruction}\n${activeContextBlock}`;
+        const fetchOptions = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: llmModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt },
+            ],
+            stream: false,
+          }),
+          signal: abortController.signal,
+        };
+        if (dispatcher) {
+          fetchOptions.dispatcher = dispatcher;
+        }
 
-      const dispatcher = getOllamaDispatcher();
-      if (dispatcher) {
-        fetchOptions.dispatcher = dispatcher;
+        llmResponse = await fetch(`${llmBase}/v1/chat/completions`, fetchOptions);
+        if (llmResponse.ok) break;
+
+        lastErrorText = await llmResponse.text();
+        const canRetryWithSmallerContext =
+          attempt === 0 &&
+          isInputTooLargeError(lastErrorText) &&
+          activeContextBlock.length > retryContextChars;
+        if (!canRetryWithSmallerContext) {
+          break;
+        }
+
+        activeContextBlock = truncateForLlm(activeContextBlock, retryContextChars);
+        console.warn(
+          `[aiPrompt] Reintentando con contexto reducido por límite de entrada del servidor (modelo=${llmModel}).`
+        );
       }
 
-      let ollamaResponse;
-      try {
-        ollamaResponse = await fetch(`${ollamaBase}/api/generate`, fetchOptions);
-      } finally {
-        clearTimeout(timeoutHandle);
-      }
+      clearTimeout(timeoutHandle);
 
       const elapsedMs = Date.now() - startedAt;
-      const latencyLog = `[aiPrompt] Ollama responded in ${elapsedMs}ms (model=${ollamaModel}, school=${targetSchool ? targetSchool.key : 'none'})`;
+      const latencyLog = `[aiPrompt] llama.cpp responded in ${elapsedMs}ms (model=${llmModel}, school=${targetSchool ? targetSchool.key : 'none'})`;
       if (elapsedMs >= slowThresholdMs) {
         console.warn(`${latencyLog} [slow>=${slowThresholdMs}ms]`);
       } else {
         console.info(latencyLog);
       }
 
-      if (!ollamaResponse.ok) {
-        const errorText = await ollamaResponse.text();
-        console.error('Ollama error:', errorText);
+      if (!llmResponse.ok) {
+        const errorText = lastErrorText || (await llmResponse.text());
+        console.error('llama.cpp error:', errorText);
         const localFallback = buildLocalCategoryCountFallback(prompt, schoolDataContext);
         if (localFallback) {
-          console.warn('[aiPrompt] Using local category fallback after non-OK Ollama response');
+          console.warn('[aiPrompt] Using local category fallback after non-OK llama.cpp response');
           return res.json({ response: localFallback, source: 'summary' });
         }
         return res.status(500).json({ error: 'Error al consultar la IA: ' + errorText });
       }
 
-      const data = await ollamaResponse.json();
-      const aiResponse = data.response || 'Sin respuesta';
+      const data = await llmResponse.json();
+      const aiResponse =
+        (data && Array.isArray(data.choices) && data.choices[0] && data.choices[0].message && data.choices[0].message.content) ||
+        'Sin respuesta';
+      // Post-proceso: si es pregunta de categoría, añadir desglose real aunque el LLM ya respondió
+      let finalResponse = aiResponse;
+      if (isCategoryCountQuestion(q) && schoolDataContext) {
+        const supplement = buildAllCategoriesBreakdown(schoolDataContext);
+        if (supplement) {
+          console.info('[aiPrompt] Appending real category breakdown to LLM response');
+          finalResponse = aiResponse + supplement;
+        }
+      }
       return res.json({
-        response: aiResponse,
+        response: finalResponse,
         source: ragContext ? 'rag' : 'summary',
       });
     } catch (fetchError) {
@@ -3787,25 +3959,91 @@ async function aiRebuildIndex(req, res) {
       return res.status(400).json({ error: 'No hay escuela seleccionada para indexar.' });
     }
 
+    const currentStatus = getIndexBuildStatus(targetSchool.key);
+    if (currentStatus && currentStatus.state === 'building') {
+      return res.status(409).json({
+        error: 'Ya existe una construcción de índice en curso para esta escuela.',
+        status: currentStatus,
+      });
+    }
+
     const schoolDataContext = await buildAiSchoolDataContext(targetSchool);
     if (!schoolDataContext) {
       return res.status(400).json({ error: 'No se encontraron datos para esta escuela.' });
     }
 
-    // Invalidate old index before rebuilding
-    schoolIndexBuilder.invalidateIndex(targetSchool.key);
+    setIndexBuildStatus(targetSchool.key, {
+      state: 'building',
+      school: targetSchool.label,
+      progressPercent: 0,
+      totalChunks: 0,
+      completedChunks: 0,
+      stage: 'queued',
+      message: 'Construcción en cola...',
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      error: null,
+    });
 
-    const index = await schoolIndexBuilder.buildSchoolIndex(
-      schoolDataContext,
-      schoolDataContext._rawRows
-    );
-    schoolIndexBuilder.saveIndex(targetSchool.key, index);
+    (async () => {
+      try {
+        // Invalidate old index before rebuilding
+        schoolIndexBuilder.invalidateIndex(targetSchool.key);
+
+        setIndexBuildStatus(targetSchool.key, {
+          state: 'building',
+          stage: 'starting',
+          message: 'Iniciando construcción del índice...',
+          progressPercent: 1,
+        });
+
+        const index = await schoolIndexBuilder.buildSchoolIndex(
+          schoolDataContext,
+          schoolDataContext._rawRows,
+          {
+            onProgress: (progress) => {
+              setIndexBuildStatus(targetSchool.key, {
+                state: 'building',
+                stage: progress.stage,
+                message: progress.message,
+                totalChunks: progress.totalChunks,
+                completedChunks: progress.completedChunks,
+                progressPercent: progress.percent,
+              });
+            },
+          }
+        );
+        schoolIndexBuilder.saveIndex(targetSchool.key, index);
+
+        setIndexBuildStatus(targetSchool.key, {
+          state: 'ready',
+          stage: 'done',
+          message: `Índice construido (${index.size} fragmentos).`,
+          progressPercent: 100,
+          totalChunks: Math.max(getIndexBuildStatus(targetSchool.key)?.totalChunks || 0, index.size),
+          completedChunks: Math.max(getIndexBuildStatus(targetSchool.key)?.completedChunks || 0, index.size),
+          chunks: index.size,
+          endedAt: new Date().toISOString(),
+          error: null,
+        });
+      } catch (error) {
+        console.error('aiRebuildIndex background error:', error);
+        setIndexBuildStatus(targetSchool.key, {
+          state: 'error',
+          stage: 'error',
+          message: 'Falló la construcción del índice.',
+          error: error.message,
+          endedAt: new Date().toISOString(),
+        });
+      }
+    })();
 
     return res.json({
       ok: true,
+      started: true,
       school: targetSchool.label,
-      chunks: index.size,
-      message: `Índice construido con ${index.size} fragmentos para "${targetSchool.label}".`,
+      schoolKey: targetSchool.key,
+      message: `Se inició la reconstrucción del índice para "${targetSchool.label}".`,
     });
   } catch (error) {
     console.error('aiRebuildIndex error:', error);
@@ -3825,12 +4063,25 @@ async function aiIndexStatus(req, res) {
     const targetSchool = schoolOptions.find((s) => s.key === schoolKey) || activeSchool;
 
     if (!targetSchool) {
-      return res.json({ indexed: false, school: null, chunks: 0 });
+      return res.json({ indexed: false, school: null, chunks: 0, building: false });
     }
 
     const index = schoolIndexBuilder.loadIndex(targetSchool.key);
+    const buildStatus = getIndexBuildStatus(targetSchool.key);
+    const isBuilding = Boolean(buildStatus && buildStatus.state === 'building');
+
     return res.json({
       indexed: Boolean(index),
+      building: isBuilding,
+      buildState: buildStatus ? buildStatus.state : index ? 'ready' : 'idle',
+      progressPercent: buildStatus ? buildStatus.progressPercent : index ? 100 : 0,
+      totalChunks: buildStatus ? buildStatus.totalChunks : index ? index.size : 0,
+      completedChunks: buildStatus ? buildStatus.completedChunks : index ? index.size : 0,
+      stage: buildStatus ? buildStatus.stage : index ? 'done' : 'idle',
+      message: buildStatus ? buildStatus.message : index ? 'Índice disponible.' : 'Sin índice.',
+      lastError: buildStatus ? buildStatus.error : null,
+      startedAt: buildStatus ? buildStatus.startedAt : null,
+      endedAt: buildStatus ? buildStatus.endedAt : null,
       school: targetSchool.label,
       schoolKey: targetSchool.key,
       chunks: index ? index.size : 0,

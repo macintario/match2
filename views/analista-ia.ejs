@@ -51,6 +51,12 @@
         <span class="btn-spinner" aria-hidden="true"></span>
       </button>
       <span id="rebuild-status" style="font-size:0.82rem; color:#555;"></span>
+      <div id="index-progress-wrap" style="width:100%; display:none;">
+        <div style="height:10px; background:#e6e6e6; border-radius:999px; overflow:hidden;">
+          <div id="index-progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg, #2d7ff9, #35b6ff); transition:width 0.3s ease;"></div>
+        </div>
+        <div id="index-progress-text" style="font-size:0.78rem; color:#444; margin-top:0.3rem;">0%</div>
+      </div>
     </div>
 
     <p style="margin:0 0 0.6rem 0;"><strong>Ejemplos:</strong></p>
@@ -89,6 +95,10 @@
     const indexBadge = document.getElementById('index-badge');
     const rebuildBtn = document.getElementById('rebuild-index-btn');
     const rebuildStatus = document.getElementById('rebuild-status');
+    const indexProgressWrap = document.getElementById('index-progress-wrap');
+    const indexProgressBar = document.getElementById('index-progress-bar');
+    const indexProgressText = document.getElementById('index-progress-text');
+    let indexPollTimer = null;
 
     const SOURCE_LABELS = {
       rag: '🔍 RAG',
@@ -118,6 +128,48 @@
       return schoolSelect ? schoolSelect.value : '';
     }
 
+    function renderIndexProgress(data) {
+      const building = Boolean(data && data.building);
+      const percentRaw = Number(data && data.progressPercent);
+      const percent = Number.isFinite(percentRaw) ? Math.max(0, Math.min(100, Math.round(percentRaw))) : 0;
+      const completed = Number(data && data.completedChunks) || 0;
+      const total = Number(data && data.totalChunks) || 0;
+      const stage = data && data.stage ? data.stage : 'idle';
+      const statusMessage = data && data.message ? data.message : '';
+
+      if (building) {
+        if (indexProgressWrap) indexProgressWrap.style.display = 'block';
+        if (indexProgressBar) indexProgressBar.style.width = percent + '%';
+        if (indexProgressText) {
+          indexProgressText.textContent =
+            `${percent}% - ${statusMessage || 'Construyendo índice...'} (${completed}/${total || '?'})`;
+        }
+        if (rebuildBtn) rebuildBtn.disabled = true;
+      } else {
+        if (indexProgressWrap) indexProgressWrap.style.display = 'none';
+        if (indexProgressBar) indexProgressBar.style.width = '0%';
+        if (indexProgressText) indexProgressText.textContent = '0%';
+        if (rebuildBtn) rebuildBtn.disabled = false;
+      }
+
+      if (data && data.buildState === 'error' && data.lastError && rebuildStatus) {
+        rebuildStatus.textContent = '✖ ' + data.lastError;
+      } else if (!building && stage === 'done' && statusMessage && rebuildStatus) {
+        rebuildStatus.textContent = statusMessage;
+      }
+    }
+
+    function ensureIndexPolling(active) {
+      if (active) {
+        if (!indexPollTimer) {
+          indexPollTimer = setInterval(refreshIndexStatus, 1500);
+        }
+      } else if (indexPollTimer) {
+        clearInterval(indexPollTimer);
+        indexPollTimer = null;
+      }
+    }
+
     async function refreshIndexStatus() {
       if (!indexBadge) return;
       try {
@@ -125,6 +177,17 @@
         const url = '<%= basePath %>/analista/ia/index-status' + (sk ? '?schoolKey=' + encodeURIComponent(sk) : '');
         const r = await fetch(url);
         const d = await r.json();
+        renderIndexProgress(d);
+        ensureIndexPolling(Boolean(d && d.building));
+
+        if (d && d.building) {
+          indexBadge.innerHTML = `<span style="color:#1f5da8;">⏳ Construyendo índice</span> — <em>${d.school}</em>`;
+          if (rebuildBtn) {
+            rebuildBtn.querySelector('.btn-label').textContent = 'Construyendo...';
+          }
+          return;
+        }
+
         if (d.indexed) {
           indexBadge.innerHTML = `<span style="color:#2a7a2a;">✔ Índice RAG activo</span> — <em>${d.school}</em> — ${d.chunks} fragmentos`;
           if (rebuildBtn) {
@@ -140,6 +203,7 @@
         }
       } catch (_) {
         if (indexBadge) indexBadge.textContent = 'No se pudo verificar el índice.';
+        ensureIndexPolling(false);
       }
     }
 
@@ -153,7 +217,10 @@
       rebuildBtn.addEventListener('click', async function () {
         rebuildBtn.disabled = true;
         rebuildBtn.classList.add('is-loading');
-        if (rebuildStatus) rebuildStatus.textContent = 'Construyendo índice, por favor espera…';
+        if (rebuildStatus) rebuildStatus.textContent = 'Iniciando construcción del índice...';
+        if (indexProgressWrap) indexProgressWrap.style.display = 'block';
+        if (indexProgressBar) indexProgressBar.style.width = '1%';
+        if (indexProgressText) indexProgressText.textContent = '1% - Iniciando...';
 
         try {
           const r = await fetch('<%= basePath %>/analista/ia/rebuild-index', {
@@ -164,14 +231,16 @@
           const d = await r.json();
           if (r.ok && d.ok) {
             if (rebuildStatus) rebuildStatus.textContent = d.message;
+            ensureIndexPolling(true);
             refreshIndexStatus();
           } else {
             if (rebuildStatus) rebuildStatus.textContent = '✖ ' + (d.error || 'Error desconocido');
+            ensureIndexPolling(false);
           }
         } catch (err) {
           if (rebuildStatus) rebuildStatus.textContent = '✖ ' + err.message;
+          ensureIndexPolling(false);
         } finally {
-          rebuildBtn.disabled = false;
           rebuildBtn.classList.remove('is-loading');
         }
       });

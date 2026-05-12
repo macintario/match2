@@ -2,7 +2,7 @@
  * vectorIndex.js
  *
  * Minimal vector store with cosine-similarity search.
- * Embeddings are generated via Ollama /api/embeddings.
+ * Embeddings are generated via llama.cpp OpenAI-compatible /v1/embeddings.
  * Indexes persist to JSON files so they survive server restarts.
  */
 
@@ -11,32 +11,199 @@
 const fs = require('fs');
 const path = require('path');
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:11434';
-// Use a dedicated embedding model if available; falls back to the generation model.
-const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://148.204.112.157:8080';
+// Prefer a dedicated embedding model to avoid relying on a chat/instruct model.
+const EMBED_MODEL =
+  process.env.LLM_EMBED_MODEL ||
+  process.env.OLLAMA_EMBED_MODEL ||
+  'nomic-embed-text';
+const DEFAULT_LLM_MODEL =
+  process.env.LLM_MODEL ||
+  process.env.OLLAMA_MODEL ||
+  'bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M';
+const FALLBACK_EMBED_MODEL = DEFAULT_LLM_MODEL;
+
+function buildEmbedConfigHint() {
+  return (
+    `Verifica que el modelo de embeddings exista en ${LLM_BASE_URL} y configura ` +
+    `LLM_EMBED_MODEL (o OLLAMA_EMBED_MODEL) con un modelo disponible.`
+  );
+}
+
+function looksLikeModelNotFoundError(status, bodyText) {
+  if (status !== 400) return false;
+  const text = String(bodyText || '').toLowerCase();
+  return text.includes('not found') && text.includes('model');
+}
+
+function looksLikePoolingCompatibilityError(status, bodyText) {
+  if (status !== 400) return false;
+  const text = String(bodyText || '').toLowerCase();
+  return text.includes('pooling type') && text.includes('not oai compatible');
+}
+
+async function requestEmbedding(modelName, text) {
+  const response = await fetch(`${LLM_BASE_URL}/v1/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelName, input: text }),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: rawText,
+      data: null,
+    };
+  }
+
+  let data = null;
+  try {
+    data = JSON.parse(rawText);
+  } catch (_) {
+    data = null;
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    bodyText: rawText,
+    data,
+  };
+}
+
+async function requestEmbeddingNative(modelName, text) {
+  const response = await fetch(`${LLM_BASE_URL}/embedding`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelName, content: text }),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: rawText,
+      data: null,
+    };
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(rawText);
+  } catch (_) {
+    payload = null;
+  }
+
+  // llama.cpp native format is usually: [{ index: 0, embedding: [[...]] }]
+  let embedding = null;
+  if (Array.isArray(payload) && payload[0] && Array.isArray(payload[0].embedding)) {
+    const first = payload[0].embedding;
+    if (Array.isArray(first[0])) {
+      embedding = first[0];
+    } else {
+      embedding = first;
+    }
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    bodyText: rawText,
+    data: embedding ? { embedding } : null,
+  };
+}
+
+async function fetchFirstAvailableModelId() {
+  try {
+    const response = await fetch(`${LLM_BASE_URL}/v1/models`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const models = Array.isArray(data && data.data) ? data.data : [];
+    for (const model of models) {
+      const id = String((model && model.id) || '').trim();
+      if (id) return id;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /**
- * Request an embedding vector from Ollama.
+ * Request an embedding vector from llama.cpp (OpenAI-compatible).
  * @param {string} text
  * @returns {Promise<number[]>}
  */
 async function embedText(text) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/embeddings`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
-  });
+  // Truncate to avoid exceeding the embedding endpoint's batch size (512 tokens).
+  // ~4 chars/token is a safe heuristic; default 1800 chars ≈ 450 tokens.
+  const maxEmbedChars = Math.max(100, parseInt(process.env.LLM_EMBED_MAX_CHARS, 10) || 1800);
+  const safeText = text.length > maxEmbedChars ? text.slice(0, maxEmbedChars) : text;
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Ollama embed error ${response.status}: ${body}`);
+  let selectedModel = EMBED_MODEL;
+  const triedModels = new Set([selectedModel]);
+  let result = await requestEmbedding(selectedModel, safeText);
+
+  const canTryFallback = Boolean(FALLBACK_EMBED_MODEL) && FALLBACK_EMBED_MODEL !== EMBED_MODEL;
+
+  if (!result.ok && canTryFallback && looksLikeModelNotFoundError(result.status, result.bodyText)) {
+    selectedModel = FALLBACK_EMBED_MODEL;
+    triedModels.add(selectedModel);
+    console.warn(
+      `[vectorIndex] Embedding model "${EMBED_MODEL}" no disponible; usando fallback "${selectedModel}".`
+    );
+    result = await requestEmbedding(selectedModel, safeText);
   }
 
-  const data = await response.json();
-  if (!Array.isArray(data.embedding) || data.embedding.length === 0) {
-    throw new Error('Ollama embedding response missing "embedding" field');
+  if (!result.ok && looksLikeModelNotFoundError(result.status, result.bodyText)) {
+    const discoveredModel = await fetchFirstAvailableModelId();
+    if (discoveredModel && !triedModels.has(discoveredModel)) {
+      selectedModel = discoveredModel;
+      triedModels.add(selectedModel);
+      console.warn(
+        `[vectorIndex] Modelo de embedding no encontrado; usando modelo detectado en /v1/models: "${selectedModel}".`
+      );
+      result = await requestEmbedding(selectedModel, safeText);
+    }
   }
-  return data.embedding;
+
+  if (!result.ok && looksLikePoolingCompatibilityError(result.status, result.bodyText)) {
+    console.warn(
+      `[vectorIndex] /v1/embeddings no compatible por pooling para "${selectedModel}"; usando fallback nativo /embedding.`
+    );
+    result = await requestEmbeddingNative(selectedModel, safeText);
+  }
+
+  if (!result.ok) {
+    throw new Error(
+      `LLM embed error ${result.status} (model=${selectedModel}, endpoint=${LLM_BASE_URL}/v1/embeddings): ${result.bodyText}. ` +
+      buildEmbedConfigHint()
+    );
+  }
+
+  const data = result.data || {};
+  // OpenAI-compatible: { data: [{ embedding: [...] }] }
+  if (Array.isArray(data.data) && data.data[0] && Array.isArray(data.data[0].embedding)) {
+    return data.data[0].embedding;
+  }
+
+  // Legacy compatibility: { embedding: [...] }
+  if (Array.isArray(data.embedding) && data.embedding.length > 0) {
+    return data.embedding;
+  }
+
+  throw new Error(
+    `Embedding response missing vector data (model=${selectedModel}, endpoint=${LLM_BASE_URL}/v1/embeddings). ` +
+    buildEmbedConfigHint()
+  );
 }
 
 /**

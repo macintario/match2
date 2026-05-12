@@ -42,6 +42,15 @@ const SCHEMA_MODELS = [
   Categ,
 ];
 
+// ─── Batch sizes para indexación (configurable vía .env) ───────────────────
+// Tamaño mayor = menos chunks = menos embeddings = más rápido
+// Pero chunks más grandes pueden perder granularidad en búsqueda semántica
+const BATCH_SIZE_PXP = Math.max(5, parseInt(process.env.RAG_BATCH_SIZE_PXP || '15', 10));
+const BATCH_SIZE_MXG = Math.max(5, parseInt(process.env.RAG_BATCH_SIZE_MXG || '15', 10));
+const BATCH_SIZE_HISTORICO = Math.max(5, parseInt(process.env.RAG_BATCH_SIZE_HISTORICO || '50', 10));
+const BATCH_SIZE_RUAA = Math.max(5, parseInt(process.env.RAG_BATCH_SIZE_RUAA || '50', 10));
+const BATCH_SIZE_CATEG = Math.max(5, parseInt(process.env.RAG_BATCH_SIZE_CATEG || '20', 10));
+
 // In-process LRU-lite cache: schoolKey -> VectorIndex
 const indexCache = new Map();
 
@@ -355,12 +364,53 @@ function buildExcelMappingChunks() {
  *
  * @param {object} schoolDataContext  Result of buildAiSchoolDataContext()
  * @param {object} rawRows            Raw DB rows: { pxpRows, mxgRows, historicoRows, ruaaRows }
+ * @param {object} options            Optional: { onProgress }
  * @returns {Promise<VectorIndex>}
  */
-async function buildSchoolIndex(schoolDataContext, rawRows) {
+async function buildSchoolIndex(schoolDataContext, rawRows, options = {}) {
   const index = new VectorIndex();
   const { schoolLabel, pxp, mxg, historico, ruaa } = schoolDataContext;
   const { pxpRows = [], mxgRows = [], historicoRows = [], ruaaRows = [], categRows = [] } = rawRows;
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
+  const progress = {
+    stage: 'preparing',
+    message: 'Preparando índice...',
+    totalChunks: 0,
+    completedChunks: 0,
+  };
+
+  function emitProgress() {
+    if (!onProgress) return;
+    const percent = progress.totalChunks > 0
+      ? Math.min(100, Math.round((progress.completedChunks * 100) / progress.totalChunks))
+      : 0;
+    onProgress({
+      stage: progress.stage,
+      message: progress.message,
+      totalChunks: progress.totalChunks,
+      completedChunks: progress.completedChunks,
+      percent,
+    });
+  }
+
+  function setStage(stage, message) {
+    progress.stage = stage;
+    progress.message = message;
+    emitProgress();
+  }
+
+  function planChunks(count) {
+    if (!Number.isFinite(count) || count <= 0) return;
+    progress.totalChunks += count;
+    emitProgress();
+  }
+
+  async function addChunkWithProgress(id, text, metadata) {
+    await index.add(id, text, metadata);
+    progress.completedChunks += 1;
+    emitProgress();
+  }
 
   // Build CLAVE → { CATEGORIA, CAT_SIMPLE } lookup from CATALOGO_CATEGORIAS
   const categByClave = new Map();
@@ -370,27 +420,39 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
   }
 
   // ── Chunks de esquema BD (globales) ───────────────────────────────────────
+  setStage('schema', 'Generando esquema de base de datos...');
   const schemaChunks = await buildDatabaseSchemaChunks();
+  planChunks(schemaChunks.length);
+  setStage('embedding_schema', 'Indexando esquema de base de datos...');
   for (const chunk of schemaChunks) {
-    await index.add(chunk.id, chunk.text, chunk.metadata);
+    await addChunkWithProgress(chunk.id, chunk.text, chunk.metadata);
   }
 
   // ── Chunks de relaciones BD (globales) ───────────────────────────────────
+  setStage('relationships', 'Generando relaciones de base de datos...');
   const relationshipChunks = buildDatabaseRelationshipChunks();
+  planChunks(relationshipChunks.length);
+  setStage('embedding_relationships', 'Indexando relaciones de base de datos...');
   for (const chunk of relationshipChunks) {
-    await index.add(chunk.id, chunk.text, chunk.metadata);
+    await addChunkWithProgress(chunk.id, chunk.text, chunk.metadata);
   }
 
   // ── Chunks de mapeo Excel -> BD (globales) ───────────────────────────────
+  setStage('excel_mapping', 'Generando mapeo Excel -> base de datos...');
   const excelMappingChunks = buildExcelMappingChunks();
+  planChunks(excelMappingChunks.length);
+  setStage('embedding_excel_mapping', 'Indexando mapeo Excel -> base de datos...');
   for (const chunk of excelMappingChunks) {
-    await index.add(chunk.id, chunk.text, chunk.metadata);
+    await addChunkWithProgress(chunk.id, chunk.text, chunk.metadata);
   }
 
   // ── Chunks de muestra de filas por tabla (globales) ──────────────────────
+  setStage('table_samples', 'Obteniendo muestras de tablas...');
   const sampleChunks = await buildDatabaseRowSampleChunks(5);
+  planChunks(sampleChunks.length);
+  setStage('embedding_table_samples', 'Indexando muestras de tablas...');
   for (const chunk of sampleChunks) {
-    await index.add(chunk.id, chunk.text, chunk.metadata);
+    await addChunkWithProgress(chunk.id, chunk.text, chunk.metadata);
   }
 
   // ── Chunk 1: Summary (always present) ─────────────────────────────────────
@@ -401,18 +463,22 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
     `Histórico: ${historico.totalDocentesUnicos} docentes únicos.`,
     `RUAA: ${ruaa.totalDocentesUnicos} docentes únicos.`,
   ].join(' ');
-  await index.add('summary', summary, { type: 'summary', school: schoolLabel });
+  planChunks(1);
+  setStage('summary', 'Generando resumen escolar...');
+  await addChunkWithProgress('summary', summary, { type: 'summary', school: schoolLabel });
 
-  // ── PxP docentes (15 per chunk) ────────────────────────────────────────────
+  // ── PxP docentes ──────────────────────────────────────────────────────────────────
   if (pxpRows.length > 0) {
-    const batches = chunkArray(pxpRows, 15);
+    const batches = chunkArray(pxpRows, BATCH_SIZE_PXP);
+    planChunks(batches.length);
+    setStage('pxp', 'Indexando docentes PxP...');
     for (let i = 0; i < batches.length; i++) {
       const text =
         `Docentes PxP en "${schoolLabel}" (grupo ${i + 1}/${batches.length}): ` +
         batches[i]
           .map((r) => `${r.nombre} RFC:${r.rfc} Dictamen:${r.dictamen}${r.funciones ? ' Funcion:' + r.funciones : ''}`)
           .join('; ');
-      await index.add(`pxp_${i}`, text, { type: 'pxp', school: schoolLabel });
+      await addChunkWithProgress(`pxp_${i}`, text, { type: 'pxp', school: schoolLabel });
     }
 
     // ── Chunk resumen de funciones únicas en PxP ───────────────────────────
@@ -420,11 +486,13 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
       pxpRows.map((r) => r.funciones).filter(Boolean)
     )].sort();
     if (uniqueFunciones.length > 0) {
+      planChunks(1);
+      setStage('pxp_funciones', 'Indexando funciones de PxP...');
       const funcionesText =
         `Funciones (campo FUNCION) registradas en el archivo PxP para "${schoolLabel}": ` +
         uniqueFunciones.join(', ') + '. ' +
         `Total de docentes en PxP: ${pxpRows.length}.`;
-      await index.add('pxp_funciones_summary', funcionesText, {
+      await addChunkWithProgress('pxp_funciones_summary', funcionesText, {
         type: 'pxp_funciones',
         school: schoolLabel,
       });
@@ -437,6 +505,8 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
       if (clave) dictamenCount.set(clave, (dictamenCount.get(clave) || 0) + 1);
     }
     if (dictamenCount.size > 0) {
+      planChunks(1);
+      setStage('pxp_dictamen', 'Indexando distribución por categoría dictaminada...');
       const lines = [...dictamenCount.entries()]
         .sort((a, b) => b[1] - a[1]) // mayor a menor
         .map(([clave, count]) => {
@@ -449,7 +519,7 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
         `Distribución de docentes PxP en "${schoolLabel}" por categoría dictaminada ` +
         `(relación campo DICTAMEN de PxP con columna CLAVE de tabla CATALOGO_CATEGORIAS): ` +
         lines.join('; ') + `. Total: ${pxpRows.length} docentes.`;
-      await index.add('pxp_dictamen_distribution', distText, {
+      await addChunkWithProgress('pxp_dictamen_distribution', distText, {
         type: 'pxp_dictamen',
         school: schoolLabel,
       });
@@ -457,7 +527,9 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
 
     // ── Chunk catálogo completo de categorías (CATALOGO_CATEGORIAS) ────────
     if (categRows.length > 0) {
-      const catBatches = chunkArray(categRows, 20);
+      const catBatches = chunkArray(categRows, BATCH_SIZE_CATEG);
+      planChunks(catBatches.length);
+      setStage('categ_catalog', 'Indexando catálogo de categorías...');
       for (let i = 0; i < catBatches.length; i++) {
         const catText =
           `Catálogo de categorías docentes (CATALOGO_CATEGORIAS) ` +
@@ -468,7 +540,7 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
               return `CLAVE:"${c.CLAVE}" CATEGORIA:"${c.CATEGORIA}"${simple}`;
             })
             .join('; ');
-        await index.add(`categ_catalog_${i}`, catText, {
+        await addChunkWithProgress(`categ_catalog_${i}`, catText, {
           type: 'categ_catalog',
           school: schoolLabel,
         });
@@ -476,9 +548,11 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
     }
   }
 
-  // ── MXG docentes con carga (15 per chunk) ─────────────────────────────────
+  // ── MXG docentes con carga ────────────────────────────────────────────────────
   if (mxgRows.length > 0) {
-    const batches = chunkArray(mxgRows, 15);
+    const batches = chunkArray(mxgRows, BATCH_SIZE_MXG);
+    planChunks(batches.length);
+    setStage('mxg', 'Indexando carga MXG...');
     for (let i = 0; i < batches.length; i++) {
       const text =
         `Docentes con carga en MXG para "${schoolLabel}" (grupo ${i + 1}/${batches.length}): ` +
@@ -488,31 +562,38 @@ async function buildSchoolIndex(schoolDataContext, rawRows) {
               `${r.nombre} RFC:${r.rfc} Plaza:${r.plaza} HrsFTG:${r.hrsFtg} HrsNecesarias:${r.hrsNecesarias}`
           )
           .join('; ');
-      await index.add(`mxg_${i}`, text, { type: 'mxg', school: schoolLabel });
+      await addChunkWithProgress(`mxg_${i}`, text, { type: 'mxg', school: schoolLabel });
     }
   }
 
-  // ── Histórico (20 per chunk) ───────────────────────────────────────────────
+  // ── Histórico ──────────────────────────────────────────────────────────────────
   if (historicoRows.length > 0) {
-    const batches = chunkArray(historicoRows, 20);
+    const batches = chunkArray(historicoRows, BATCH_SIZE_HISTORICO);
+    planChunks(batches.length);
+    setStage('historico', 'Indexando histórico...');
     for (let i = 0; i < batches.length; i++) {
       const text =
         `Docentes en Histórico para "${schoolLabel}" (grupo ${i + 1}/${batches.length}): ` +
         batches[i].map((r) => `${r.nombre} RFC:${r.rfc}`).join('; ');
-      await index.add(`hist_${i}`, text, { type: 'historico', school: schoolLabel });
+      await addChunkWithProgress(`hist_${i}`, text, { type: 'historico', school: schoolLabel });
     }
   }
 
-  // ── RUAA (20 per chunk) ────────────────────────────────────────────────────
+  // ── RUAA ───────────────────────────────────────────────────────────────────────
   if (ruaaRows.length > 0) {
-    const batches = chunkArray(ruaaRows, 20);
+    const batches = chunkArray(ruaaRows, BATCH_SIZE_RUAA);
+    planChunks(batches.length);
+    setStage('ruaa', 'Indexando RUAA...');
     for (let i = 0; i < batches.length; i++) {
       const text =
         `Docentes en RUAA para "${schoolLabel}" (grupo ${i + 1}/${batches.length}): ` +
         batches[i].map((r) => `${r.nombre} RFC:${r.rfc}`).join('; ');
-      await index.add(`ruaa_${i}`, text, { type: 'ruaa', school: schoolLabel });
+      await addChunkWithProgress(`ruaa_${i}`, text, { type: 'ruaa', school: schoolLabel });
     }
   }
+
+  progress.completedChunks = Math.max(progress.completedChunks, progress.totalChunks);
+  setStage('done', 'Índice terminado.');
 
   return index;
 }
